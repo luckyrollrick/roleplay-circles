@@ -19,7 +19,21 @@ app = Flask(__name__)
 
 # Paths - use /data for persistence on Render, fallback to local for dev
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = '/data' if os.path.exists('/data') else BASE_DIR
+
+def is_data_dir_ready():
+    """Check if /data exists AND is writable."""
+    if not os.path.exists('/data'):
+        return False
+    try:
+        test_file = '/data/.write_test'
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+DATA_DIR = '/data' if is_data_dir_ready() else BASE_DIR
 CONFIG_PATH = os.path.join(DATA_DIR, 'config.json')
 STATE_PATH = os.path.join(DATA_DIR, 'state.json')
 NOTIFICATIONS_PATH = os.path.join(DATA_DIR, 'notifications.json')
@@ -561,11 +575,24 @@ def get_invite(code):
 
 def init_data_files():
     """Initialize data files if they don't exist."""
-    if not os.path.exists(STATE_PATH):
-        save_state({"noshow_events": [], "available_users": {}})
-    if not os.path.exists(CIRCLES_PATH):
-        save_circles({"circles": []})
-    print(f"📁 Data directory: {DATA_DIR}")
+    try:
+        print(f"📁 Data directory: {DATA_DIR}")
+        print(f"   STATE_PATH: {STATE_PATH}")
+        print(f"   CIRCLES_PATH: {CIRCLES_PATH}")
+        
+        if not os.path.exists(STATE_PATH):
+            save_state({"noshow_events": [], "available_users": {}})
+            print("   Created state.json")
+        
+        if not os.path.exists(CIRCLES_PATH):
+            save_circles({"circles": []})
+            print("   Created circles.json")
+        
+        print("✅ Data files initialized successfully")
+    except Exception as e:
+        print(f"⚠️ Error initializing data files: {e}")
+        # Don't crash - the app can still work with in-memory fallbacks
+        pass
 
 # Initialize on import (for gunicorn)
 init_data_files()
