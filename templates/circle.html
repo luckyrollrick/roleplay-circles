@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ circle.name }} - Roleplay Circles</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" id="favicon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
 </head>
 <body>
     <div class="widget">
@@ -97,9 +98,60 @@
 
     <script>
         const circleCode = '{{ code }}';
+        const circleName = '{{ circle.name }}';
         let currentUser = '{{ user.id if user else "" }}';
         let pollInterval;
         let availableZoomLinks = [];
+        let lastAvailableCount = 0;
+        let titleBlinkInterval = null;
+        const originalTitle = document.title;
+        
+        // Favicon SVGs
+        const normalFavicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>";
+        const alertFavicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔴</text></svg>";
+        
+        function updateTabNotification(availableCount, names) {
+            const favicon = document.getElementById('favicon');
+            
+            if (availableCount > 0) {
+                // Change favicon to alert
+                favicon.href = alertFavicon;
+                
+                // Start blinking title if not already
+                if (!titleBlinkInterval) {
+                    let showAlert = true;
+                    titleBlinkInterval = setInterval(() => {
+                        if (showAlert) {
+                            document.title = `🔴 (${availableCount}) ${names.join(', ')} available!`;
+                        } else {
+                            document.title = circleName;
+                        }
+                        showAlert = !showAlert;
+                    }, 1000);
+                }
+            } else {
+                // Reset to normal
+                favicon.href = normalFavicon;
+                document.title = originalTitle;
+                if (titleBlinkInterval) {
+                    clearInterval(titleBlinkInterval);
+                    titleBlinkInterval = null;
+                }
+            }
+        }
+        
+        // Stop blinking when tab is focused
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && titleBlinkInterval) {
+                // User is looking at tab, stop blinking but keep indicator
+                clearInterval(titleBlinkInterval);
+                titleBlinkInterval = null;
+                // Keep the count in title if people still available
+                if (lastAvailableCount > 0) {
+                    document.title = `(${lastAvailableCount}) ${circleName}`;
+                }
+            }
+        });
 
         document.addEventListener('DOMContentLoaded', () => {
             loadSettings();
@@ -171,14 +223,19 @@
                 const groupBanner = document.getElementById('groupBanner');
                 const availableOthers = data.available_members.filter(u => u.id !== currentUser);
                 availableZoomLinks = availableOthers.map(u => u.zoom_link).filter(Boolean);
+                const availableNames = availableOthers.map(u => u.name);
                 
                 if (availableOthers.length >= 1) {
                     groupBanner.classList.remove('hidden');
                     document.getElementById('groupCount').textContent = data.available_count;
-                    document.getElementById('groupNames').textContent = availableOthers.map(u => u.name).join(', ');
+                    document.getElementById('groupNames').textContent = availableNames.join(', ');
                 } else {
                     groupBanner.classList.add('hidden');
                 }
+                
+                // Update tab notification
+                lastAvailableCount = availableOthers.length;
+                updateTabNotification(availableOthers.length, availableNames);
                 
                 // Team list
                 const teamList = document.getElementById('teamList');
