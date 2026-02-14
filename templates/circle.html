@@ -108,7 +108,7 @@
         
         // Favicon SVGs
         const normalFavicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>";
-        const alertFavicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔴</text></svg>";
+        const alertFavicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🟢</text></svg>";
         
         function updateTabNotification(availableCount, names) {
             const favicon = document.getElementById('favicon');
@@ -122,7 +122,7 @@
                     let showAlert = true;
                     titleBlinkInterval = setInterval(() => {
                         if (showAlert) {
-                            document.title = `🔴 (${availableCount}) ${names.join(', ')} available!`;
+                            document.title = `🟢 (${availableCount}) ${names.join(', ')} available!`;
                         } else {
                             document.title = circleName;
                         }
