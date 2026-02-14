@@ -798,3 +798,64 @@ h3 {
     font-size: 13px;
     flex: 1;
 }
+
+/* Rejoin Section */
+.rejoin-section {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.rejoin-section p {
+    color: #b8c5dc;
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+.rejoin-form {
+    display: flex;
+    gap: 8px;
+}
+
+.rejoin-form input {
+    flex: 1;
+    background: #1e2a4a;
+    border: 1px solid #2a3a5e;
+    color: #fff;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 16px;
+    text-align: center;
+    letter-spacing: 2px;
+}
+
+.rejoin-form input:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+.btn-rejoin {
+    background: #3b82f6;
+    color: #fff;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.btn-rejoin:hover {
+    background: #2563eb;
+}
+
+.divider {
+    border: none;
+    border-top: 1px solid #2a3a5e;
+    margin: 24px 0;
+}
+
+.create-form h2 {
+    color: #6c7a9c;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 16px;
+    text-align: center;
+}

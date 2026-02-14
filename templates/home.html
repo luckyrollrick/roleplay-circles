@@ -21,6 +21,16 @@
         
         <p class="tagline">Find roleplay partners when your calendar opens up</p>
         
+        <div class="rejoin-section">
+            <p>Have an invite code?</p>
+            <div class="rejoin-form">
+                <input type="text" id="circleCode" placeholder="Enter code (e.g. RPR061)" maxlength="6" style="text-transform: uppercase;">
+                <button class="btn btn-rejoin" onclick="rejoinCircle()">Go</button>
+            </div>
+        </div>
+        
+        <hr class="divider">
+        
         <div class="create-form">
             <h2>Create a Circle</h2>
             
@@ -103,6 +113,20 @@
                 document.querySelector('.btn-copy').textContent = 'Copy';
             }, 2000);
         }
+        
+        function rejoinCircle() {
+            const code = document.getElementById('circleCode').value.trim().toUpperCase();
+            if (!code) {
+                alert('Enter a circle code');
+                return;
+            }
+            window.location.href = `/join/${code}`;
+        }
+        
+        // Allow Enter key on code input
+        document.getElementById('circleCode').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') rejoinCircle();
+        });
         
         // Register service worker
         if ('serviceWorker' in navigator) {
