@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ circle.name }} - Roleplay Circles</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="widget">
+        <header>
+            <div class="header-left">
+                <h1>🎯 {{ circle.name }}</h1>
+            </div>
+            <div class="user-name">
+                👤 {{ user.name if user else 'Unknown' }}
+            </div>
+        </header>
+
+        <!-- Notification Banner -->
+        <div id="notification" class="notification hidden">
+            <span id="notificationText"></span>
+            <button onclick="hideNotification()">×</button>
+        </div>
+
+        <!-- Group Session Banner -->
+        <div id="groupBanner" class="group-banner hidden">
+            <div class="group-banner-content">
+                <span class="group-icon">👥</span>
+                <div class="group-info">
+                    <strong id="groupCount">0</strong> people available!
+                    <div id="groupNames" class="group-names"></div>
+                </div>
+                <button class="btn btn-group-join" onclick="joinGroupSession()">Join Session</button>
+            </div>
+        </div>
+
+        <!-- Availability Status -->
+        <div class="status-bar">
+            <div id="myStatus" class="status-item">
+                <span class="status-dot available"></span>
+                <span>Your status: <strong id="myStatusText">Checking...</strong></span>
+            </div>
+            <div class="status-actions">
+                <button id="availableBtn" class="btn btn-available" onclick="setAvailable()">I'm Available</button>
+                <button id="unavailableBtn" class="btn btn-unavailable hidden" onclick="setUnavailable()">Go Busy</button>
+            </div>
+        </div>
+
+        <!-- Team Status -->
+        <div id="teamStatus" class="team-status">
+            <h3>Team <span id="teamCount" class="team-count"></span></h3>
+            <div id="teamList"></div>
+        </div>
+
+        <!-- Current Status / Next Event -->
+        <div class="current-section">
+            <div id="currentStatus">
+                <p class="loading">Checking calendar...</p>
+            </div>
+        </div>
+
+        <!-- Invite Link -->
+        <div class="invite-section">
+            <button class="btn btn-invite" onclick="showInvite()">📨 Invite Teammate</button>
+            <div id="invitePanel" class="invite-panel hidden">
+                <p>Share this link:</p>
+                <div class="invite-link">
+                    <input type="text" id="inviteLinkInput" readonly value="">
+                    <button class="btn btn-copy" onclick="copyInvite()">Copy</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="settings-section">
+            <button class="settings-toggle" onclick="toggleSettings()">⚙️ Settings</button>
+            <div id="settingsPanel" class="settings-panel hidden">
+                <div class="setting-row">
+                    <label>Calendar ICS URL:</label>
+                    <input type="text" id="icsUrl" placeholder="Paste your Google Calendar ICS URL">
+                </div>
+                <div class="setting-row">
+                    <label>Your Zoom Link:</label>
+                    <input type="text" id="zoomLink" placeholder="https://zoom.us/j/...">
+                </div>
+                <div class="setting-row">
+                    <label>Availability Window:</label>
+                    <select id="startHour"></select>
+                    <span>to</span>
+                    <select id="endHour"></select>
+                </div>
+                <button class="btn btn-save" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const circleCode = '{{ code }}';
+        let currentUser = '{{ user.id if user else "" }}';
+        let pollInterval;
+        let availableZoomLinks = [];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSettings();
+            loadEvents();
+            loadStatus();
+            loadInviteLink();
+            requestNotificationPermission();
+            pollInterval = setInterval(() => {
+                loadEvents();
+                loadStatus();
+                checkNotifications();
+            }, 15000);
+        });
+
+        async function requestNotificationPermission() {
+            if (!('Notification' in window)) return;
+            if (Notification.permission === 'default') {
+                await Notification.requestPermission();
+            }
+        }
+
+        function sendBrowserNotification(title, body, zoomLink) {
+            if (Notification.permission !== 'granted') return;
+            
+            const notification = new Notification(title, {
+                body: body,
+                icon: '🎯',
+                tag: 'roleplay-available',
+                requireInteraction: true
+            });
+            
+            notification.onclick = function() {
+                window.focus();
+                if (zoomLink) window.open(zoomLink, '_blank');
+                notification.close();
+            };
+        }
+
+        async function loadStatus() {
+            try {
+                const response = await fetch(`/api/circle/${circleCode}/status`);
+                const data = await response.json();
+                
+                const me = data.members.find(u => u.id === currentUser);
+                const others = data.members.filter(u => u.id !== currentUser);
+                
+                document.getElementById('teamCount').textContent = `(${data.members.length})`;
+                
+                if (me) {
+                    const statusText = document.getElementById('myStatusText');
+                    const availBtn = document.getElementById('availableBtn');
+                    const unavailBtn = document.getElementById('unavailableBtn');
+                    const statusDot = document.querySelector('#myStatus .status-dot');
+                    
+                    if (me.available) {
+                        statusText.textContent = 'Available';
+                        statusDot.className = 'status-dot available';
+                        availBtn.classList.add('hidden');
+                        unavailBtn.classList.remove('hidden');
+                    } else {
+                        statusText.textContent = 'Busy';
+                        statusDot.className = 'status-dot busy';
+                        availBtn.classList.remove('hidden');
+                        unavailBtn.classList.add('hidden');
+                    }
+                }
+                
+                // Group banner
+                const groupBanner = document.getElementById('groupBanner');
+                const availableOthers = data.available_members.filter(u => u.id !== currentUser);
+                availableZoomLinks = availableOthers.map(u => u.zoom_link).filter(Boolean);
+                
+                if (availableOthers.length >= 1) {
+                    groupBanner.classList.remove('hidden');
+                    document.getElementById('groupCount').textContent = data.available_count;
+                    document.getElementById('groupNames').textContent = availableOthers.map(u => u.name).join(', ');
+                } else {
+                    groupBanner.classList.add('hidden');
+                }
+                
+                // Team list
+                const teamList = document.getElementById('teamList');
+                if (others.length === 0) {
+                    teamList.innerHTML = '<p class="no-team">No teammates yet. Share the invite link!</p>';
+                } else {
+                    teamList.innerHTML = others.map(user => `
+                        <div class="team-member ${user.available ? 'available' : 'busy'}">
+                            <span class="status-dot ${user.available ? 'available' : 'busy'}"></span>
+                            <span class="name">${escapeHtml(user.name)}</span>
+                            ${user.available && user.zoom_link ? `
+                                <a href="${user.zoom_link}" target="_blank" class="btn btn-join">Join</a>
+                            ` : ''}
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Error loading status:', err);
+            }
+        }
+
+        async function loadEvents() {
+            if (!currentUser) return;
+            
+            try {
+                const response = await fetch(`/api/circle/${circleCode}/events/${currentUser}`);
+                const data = await response.json();
+                
+                const container = document.getElementById('currentStatus');
+                
+                if (!data.events || data.events.length === 0) {
+                    // No calls - show free status
+                    container.innerHTML = `
+                        <div class="free-status">
+                            <div class="free-icon">✨</div>
+                            <div class="free-text">You're free!</div>
+                            <p class="free-hint">Toggle available above to find roleplay partners</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Find current or next event
+                const now = new Date();
+                let relevantEvent = null;
+                
+                for (const event of data.events) {
+                    const start = new Date(event.start);
+                    const end = new Date(event.end);
+                    
+                    // Currently in this event or it's coming up within 30 min
+                    if (now >= start && now <= end) {
+                        relevantEvent = event;
+                        relevantEvent.status = 'in_progress';
+                        break;
+                    } else if (start > now && (start - now) < 30 * 60 * 1000) {
+                        relevantEvent = event;
+                        relevantEvent.status = 'upcoming';
+                        break;
+                    }
+                }
+                
+                if (!relevantEvent) {
+                    // Find next future event
+                    for (const event of data.events) {
+                        const start = new Date(event.start);
+                        if (start > now) {
+                            relevantEvent = event;
+                            relevantEvent.status = 'later';
+                            break;
+                        }
+                    }
+                }
+                
+                if (!relevantEvent) {
+                    // All events passed
+                    container.innerHTML = `
+                        <div class="free-status">
+                            <div class="free-icon">✨</div>
+                            <div class="free-text">You're free!</div>
+                            <p class="free-hint">No more calls today</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Show the relevant event
+                const statusLabel = relevantEvent.status === 'in_progress' ? 'NOW' : 
+                                    relevantEvent.status === 'upcoming' ? 'SOON' : 'NEXT';
+                
+                container.innerHTML = `
+                    <div class="current-event ${relevantEvent.status}">
+                        <div class="event-status-label">${statusLabel}</div>
+                        <div class="event-time">${relevantEvent.start_time} - ${relevantEvent.end_time}</div>
+                        <div class="event-title">${escapeHtml(relevantEvent.summary)}</div>
+                        ${relevantEvent.needs_noshow_prompt && !relevantEvent.marked_noshow ? `
+                            <div class="event-actions">
+                                <span class="prompt-text">Did they show up?</span>
+                                <button class="btn btn-showed" onclick="dismissPrompt(this)">Yes ✓</button>
+                                <button class="btn btn-noshow" onclick="markNoShow('${relevantEvent.uid}')">No-Show</button>
+                            </div>
+                        ` : ''}
+                        ${relevantEvent.marked_noshow ? '<span class="noshow-badge">No-Show ✓</span>' : ''}
+                    </div>
+                `;
+            } catch (err) {
+                console.error('Error loading events:', err);
+            }
+        }
+
+        function joinGroupSession() {
+            if (availableZoomLinks.length > 0) {
+                window.open(availableZoomLinks[0], '_blank');
+            }
+        }
+
+        async function setAvailable() {
+            try {
+                const response = await fetch(`/api/circle/${circleCode}/available`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: currentUser})
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showNotification('🎯 You\'re available!', 'success');
+                    loadStatus();
+                }
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        async function setUnavailable() {
+            try {
+                await fetch(`/api/circle/${circleCode}/unavailable`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: currentUser})
+                });
+                loadStatus();
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        async function markNoShow(eventUid) {
+            try {
+                await fetch(`/api/circle/${circleCode}/noshow`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: currentUser, event_uid: eventUid})
+                });
+                showNotification('✅ Marked as no-show. Team notified!', 'success');
+                loadEvents();
+                loadStatus();
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        function dismissPrompt(btn) {
+            btn.closest('.event').classList.remove('prompt');
+            btn.closest('.event-actions').remove();
+        }
+
+        let seenNotifications = new Set();
+        
+        async function checkNotifications() {
+            try {
+                const response = await fetch(`/api/circle/${circleCode}/notifications`);
+                const data = await response.json();
+                
+                for (const notif of data.notifications) {
+                    if (notif.to_user_id !== currentUser) continue;
+                    
+                    const key = notif.timestamp;
+                    if (seenNotifications.has(key)) continue;
+                    seenNotifications.add(key);
+                    
+                    showNotification(notif.message, 'info');
+                    sendBrowserNotification('🎯 Teammate Available!', notif.message, notif.zoom_link);
+                    
+                    fetch(`/api/circle/${circleCode}/notifications/mark-delivered`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({timestamp: notif.timestamp})
+                    });
+                }
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        async function loadInviteLink() {
+            try {
+                const response = await fetch(`/api/circle/${circleCode}/invite`);
+                const data = await response.json();
+                document.getElementById('inviteLinkInput').value = window.location.origin + data.invite_path;
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        function showInvite() {
+            document.getElementById('invitePanel').classList.toggle('hidden');
+        }
+
+        function copyInvite() {
+            const input = document.getElementById('inviteLinkInput');
+            input.select();
+            document.execCommand('copy');
+            showNotification('📋 Invite link copied!', 'success');
+        }
+
+        function showNotification(message, type = 'info') {
+            const el = document.getElementById('notification');
+            document.getElementById('notificationText').textContent = message;
+            el.className = `notification ${type}`;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 5000);
+        }
+
+        function hideNotification() {
+            document.getElementById('notification').classList.add('hidden');
+        }
+
+        function toggleSettings() {
+            document.getElementById('settingsPanel').classList.toggle('hidden');
+        }
+
+        async function loadSettings() {
+            const startHour = document.getElementById('startHour');
+            const endHour = document.getElementById('endHour');
+            
+            for (let i = 0; i < 24; i++) {
+                const label = i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i-12} PM`;
+                startHour.innerHTML += `<option value="${i}">${label}</option>`;
+                endHour.innerHTML += `<option value="${i}">${label}</option>`;
+            }
+            
+            // Set defaults from user data
+            {% if user %}
+            document.getElementById('icsUrl').value = '{{ user.ics_url | default("", true) }}';
+            document.getElementById('zoomLink').value = '{{ user.zoom_link | default("", true) }}';
+            document.getElementById('startHour').value = {{ user.start_hour | default(9, true) }};
+            document.getElementById('endHour').value = {{ user.end_hour | default(18, true) }};
+            {% endif %}
+        }
+
+        async function saveSettings() {
+            const settings = {
+                user_id: currentUser,
+                ics_url: document.getElementById('icsUrl').value,
+                zoom_link: document.getElementById('zoomLink').value,
+                start_hour: parseInt(document.getElementById('startHour').value),
+                end_hour: parseInt(document.getElementById('endHour').value)
+            };
+            
+            try {
+                await fetch(`/api/circle/${circleCode}/settings`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(settings)
+                });
+                showNotification('✅ Settings saved!', 'success');
+                toggleSettings();
+                loadEvents();
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

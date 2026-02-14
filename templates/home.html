@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roleplay Circles</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="widget centered">
+        <header>
+            <h1>🎯 Roleplay Circles</h1>
+        </header>
+        
+        <p class="tagline">Find roleplay partners when your calendar opens up</p>
+        
+        <div class="create-form">
+            <h2>Create a Circle</h2>
+            
+            <div class="form-group">
+                <label>Circle Name</label>
+                <input type="text" id="circleName" placeholder="e.g. Raz's Closers">
+            </div>
+            
+            <div class="form-group">
+                <label>Your Name</label>
+                <input type="text" id="creatorName" placeholder="e.g. Ricky">
+            </div>
+            
+            <div class="form-group">
+                <label>Your Zoom Link (optional)</label>
+                <input type="text" id="zoomLink" placeholder="https://zoom.us/j/...">
+            </div>
+            
+            <button class="btn btn-create" onclick="createCircle()">Create Circle</button>
+        </div>
+        
+        <div id="result" class="result hidden">
+            <h3>✅ Circle Created!</h3>
+            <p>Share this invite link with your team:</p>
+            <div class="invite-link">
+                <input type="text" id="inviteLink" readonly>
+                <button class="btn btn-copy" onclick="copyLink()">Copy</button>
+            </div>
+            <a id="enterCircle" href="#" class="btn btn-enter">Enter Circle →</a>
+        </div>
+    </div>
+
+    <script>
+        async function createCircle() {
+            const name = document.getElementById('circleName').value.trim();
+            const creatorName = document.getElementById('creatorName').value.trim();
+            const zoomLink = document.getElementById('zoomLink').value.trim();
+            
+            if (!name || !creatorName) {
+                alert('Please fill in circle name and your name');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name, creator_name: creatorName, zoom_link: zoomLink })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const fullLink = window.location.origin + data.invite_link;
+                    document.getElementById('inviteLink').value = fullLink;
+                    document.getElementById('enterCircle').href = `/c/${data.code}?user=${creatorName.toLowerCase().replace(' ', '_')}`;
+                    document.getElementById('result').classList.remove('hidden');
+                    document.querySelector('.create-form').classList.add('hidden');
+                } else {
+                    alert(data.error || 'Failed to create circle');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Error creating circle');
+            }
+        }
+        
+        function copyLink() {
+            const input = document.getElementById('inviteLink');
+            input.select();
+            document.execCommand('copy');
+            document.querySelector('.btn-copy').textContent = 'Copied!';
+            setTimeout(() => {
+                document.querySelector('.btn-copy').textContent = 'Copy';
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

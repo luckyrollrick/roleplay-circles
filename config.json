@@ -1,0 +1,18 @@
+{
+  "users": [
+    {
+      "id": "ricky",
+      "name": "Ricky",
+      "ics_url": "https://calendar.google.com/calendar/ical/ricardo.gonzalez%40growchannels.com/private-c5da42c0e876c01a0a8a9012e452865f/basic.ics",
+      "zoom_link": "https://zoom.us/j/6858230271?pwd=fv0O2t2nOxvgNJM24644DsUgHA9P0d.1",
+      "telegram_id": "5496570691",
+      "availability": {
+        "start_hour": 10,
+        "end_hour": 18,
+        "timezone": "America/Chicago"
+      }
+    }
+  ],
+  "noshow_prompt_delay_minutes": 10,
+  "check_interval_seconds": 60
+}

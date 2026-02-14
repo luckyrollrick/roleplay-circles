@@ -1,0 +1,48 @@
+{
+  "circles": [
+    {
+      "code": "82YTON",
+      "name": "GrowChannels Closers",
+      "created_at": "2026-02-13T22:26:48.675589",
+      "members": [
+        {
+          "id": "ricky",
+          "name": "Ricky",
+          "zoom_link": "",
+          "ics_url": "https://calendar.google.com/calendar/ical/ricky%40rickyadrian.com/private-1ac0458df80f3ee4a0c41e131f8eeb09/basic.ics",
+          "timezone": "America/Chicago",
+          "start_hour": 9,
+          "end_hour": 18,
+          "is_creator": true
+        },
+        {
+          "id": "mike",
+          "name": "Mike",
+          "zoom_link": "",
+          "ics_url": "",
+          "timezone": "America/Chicago",
+          "start_hour": 9,
+          "end_hour": 18,
+          "is_creator": false
+        }
+      ]
+    },
+    {
+      "code": "XOWHIN",
+      "name": "GC Closers",
+      "created_at": "2026-02-13T22:49:07.225147",
+      "members": [
+        {
+          "id": "ricky",
+          "name": "Ricky",
+          "zoom_link": "",
+          "ics_url": "",
+          "timezone": "America/Chicago",
+          "start_hour": 9,
+          "end_hour": 18,
+          "is_creator": true
+        }
+      ]
+    }
+  ]
+}
