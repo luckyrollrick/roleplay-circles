@@ -17,12 +17,13 @@ import pytz
 
 app = Flask(__name__)
 
-# Paths
+# Paths - use /data for persistence on Render, fallback to local for dev
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
-STATE_PATH = os.path.join(BASE_DIR, 'state.json')
-NOTIFICATIONS_PATH = os.path.join(BASE_DIR, 'notifications.json')
-CIRCLES_PATH = os.path.join(BASE_DIR, 'circles.json')
+DATA_DIR = '/data' if os.path.exists('/data') else BASE_DIR
+CONFIG_PATH = os.path.join(DATA_DIR, 'config.json')
+STATE_PATH = os.path.join(DATA_DIR, 'state.json')
+NOTIFICATIONS_PATH = os.path.join(DATA_DIR, 'notifications.json')
+CIRCLES_PATH = os.path.join(DATA_DIR, 'circles.json')
 
 
 def generate_code(length=6):
@@ -558,13 +559,18 @@ def get_invite(code):
     })
 
 
-if __name__ == '__main__':
-    # Initialize files if needed
+def init_data_files():
+    """Initialize data files if they don't exist."""
     if not os.path.exists(STATE_PATH):
         save_state({"noshow_events": [], "available_users": {}})
     if not os.path.exists(CIRCLES_PATH):
         save_circles({"circles": []})
-    
+    print(f"📁 Data directory: {DATA_DIR}")
+
+# Initialize on import (for gunicorn)
+init_data_files()
+
+if __name__ == '__main__':
     print("🎯 Roleplay Circles")
     print("   Open http://localhost:5050 to create a circle")
     app.run(debug=False, port=5050, host='0.0.0.0', threaded=True)
