@@ -1,22 +1,11 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Error - Roleplay Circles</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <div class="widget centered">
-        <header>
-            <h1>🎯 Roleplay Circles</h1>
-        </header>
-        
-        <div class="error-message">
-            <h2>😕 Oops</h2>
-            <p>{{ message }}</p>
-            <a href="/" class="btn btn-create">← Go Home</a>
-        </div>
-    </div>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Error - Roleplay Circles{% endblock %}
+
+{% block body %}
+<div class="landing">
+    <div class="landing-icon">😕</div>
+    <h1 style="font-size: 1.5rem; background: none; -webkit-text-fill-color: var(--text);">Oops</h1>
+    <p>{{ message }}</p>
+    <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+</div>
+{% endblock %}

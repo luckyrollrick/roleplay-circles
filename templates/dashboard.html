@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Roleplay Circles{% endblock %}
+
+{% block nav %}
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="/dashboard" class="nav-brand">
+            <span>🎯</span> Roleplay Circles
+        </a>
+        <div class="nav-links">
+            <a href="/settings" class="btn btn-ghost btn-sm">⚙️ Settings</a>
+            <div class="nav-user">
+                {% if user.avatar_url %}
+                <img src="{{ user.avatar_url }}" alt="" class="nav-avatar">
+                {% endif %}
+                <span class="nav-user-name">{{ user.name }}</span>
+            </div>
+            <a href="/auth/logout" class="btn btn-ghost btn-sm">Logout</a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block body %}
+<div class="container page">
+    <div class="page-title">Welcome, {{ user.name.split(' ')[0] }} 👋</div>
+    <div class="page-subtitle">Your roleplay circles</div>
+
+    {% if circles %}
+    <div class="section">
+        {% for circle in circles %}
+        <a href="/c/{{ circle.code }}" class="circle-list-item">
+            <div>
+                <div class="circle-list-name">{{ circle.name }}</div>
+                <div class="circle-list-meta">
+                    {{ circle.member_count }} member{{ 's' if circle.member_count != 1 else '' }}
+                    · {{ circle.role }}
+                </div>
+            </div>
+            <span class="circle-list-badge">{{ circle.code }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">🎯</div>
+        <p>You haven't joined any circles yet.</p>
+        <p class="text-sm text-muted">Create one or ask your manager for an invite link.</p>
+    </div>
+    {% endif %}
+
+    <div class="flex gap-1 mt-2">
+        <button onclick="openCreateModal()" class="btn btn-primary">
+            ➕ Create Circle
+        </button>
+        <button onclick="openJoinModal()" class="btn btn-secondary">
+            🔗 Join with Code
+        </button>
+    </div>
+</div>
+
+<!-- Create Circle Modal -->
+<div class="modal-overlay" id="createModal">
+    <div class="modal">
+        <div class="modal-title">Create a Circle</div>
+        <div class="form-group">
+            <label class="form-label">Circle Name</label>
+            <input type="text" id="circleName" class="form-input"
+                   placeholder="e.g. Sales Team Alpha" maxlength="50">
+        </div>
+        <div class="flex gap-1">
+            <button onclick="createCircle()" class="btn btn-primary" id="createBtn">Create</button>
+            <button onclick="closeModal('createModal')" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Join Circle Modal -->
+<div class="modal-overlay" id="joinModal">
+    <div class="modal">
+        <div class="modal-title">Join a Circle</div>
+        <div class="form-group">
+            <label class="form-label">Invite Code</label>
+            <input type="text" id="joinCode" class="form-input"
+                   placeholder="e.g. ABC123" maxlength="10"
+                   style="text-transform: uppercase; font-family: monospace; font-size: 1.2rem; text-align: center; letter-spacing: 4px;">
+        </div>
+        <div class="flex gap-1">
+            <button onclick="joinWithCode()" class="btn btn-primary">Join</button>
+            <button onclick="closeModal('joinModal')" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openCreateModal() {
+    document.getElementById('createModal').classList.add('active');
+    document.getElementById('circleName').focus();
+}
+
+function openJoinModal() {
+    document.getElementById('joinModal').classList.add('active');
+    document.getElementById('joinCode').focus();
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+}
+
+// Close on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.classList.remove('active');
+    });
+});
+
+async function createCircle() {
+    const name = document.getElementById('circleName').value.trim();
+    if (!name) return showToast('Enter a circle name', 'error');
+
+    const btn = document.getElementById('createBtn');
+    btn.disabled = true;
+
+    try {
+        const data = await api('/circles/create', {
+            method: 'POST',
+            body: { name }
+        });
+        showToast('Circle created!');
+        setTimeout(() => {
+            window.location.href = `/c/${data.code}`;
+        }, 500);
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+    }
+}
+
+function joinWithCode() {
+    const code = document.getElementById('joinCode').value.trim().toUpperCase();
+    if (!code) return showToast('Enter an invite code', 'error');
+    window.location.href = `/join/${code}`;
+}
+
+// Enter key support
+document.getElementById('circleName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createCircle();
+});
+document.getElementById('joinCode').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') joinWithCode();
+});
+</script>
+{% endblock %}

@@ -1,99 +1,88 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#3b82f6">
-    <meta name="description" content="Find roleplay partners on your sales team">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Circles">
-    <title>Join {{ circle.name }} - Roleplay Circles</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="manifest" href="/static/manifest.json">
-    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-</head>
-<body>
-    <div class="widget centered">
-        <header>
-            <h1>🎯 Roleplay Circles</h1>
-        </header>
-        
-        <div class="join-header">
-            <h2>Join "{{ circle.name }}"</h2>
-            <p class="member-count">{{ circle.members|length }} member{% if circle.members|length != 1 %}s{% endif %} already in</p>
-        </div>
-        
-        <div class="join-form">
-            <div class="form-group">
-                <label>Your Name</label>
-                <input type="text" id="userName" placeholder="e.g. Mike">
-            </div>
-            
-            <div class="form-group">
-                <label>Your Zoom Link (optional)</label>
-                <input type="text" id="zoomLink" placeholder="https://zoom.us/j/...">
-            </div>
-            
-            <button class="btn btn-join-circle" onclick="joinCircle()">Join Circle</button>
-        </div>
-        
-        <div class="existing-members">
-            <p>Already a member?</p>
-            <select id="existingMember" onchange="goToMember()">
-                <option value="">Select your name...</option>
-                {% for member in circle.members %}
-                <option value="{{ member.id }}">{{ member.name }}</option>
-                {% endfor %}
-            </select>
-        </div>
-    </div>
+{% extends "base.html" %}
+{% block title %}Join {{ circle.name }} - Roleplay Circles{% endblock %}
 
-    <script>
-        const circleCode = '{{ code }}';
-        
-        async function joinCircle() {
-            const name = document.getElementById('userName').value.trim();
-            const zoomLink = document.getElementById('zoomLink').value.trim();
-            
-            if (!name) {
-                alert('Please enter your name');
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/join/${circleCode}/submit`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ name, zoom_link: zoomLink })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    window.location.href = data.redirect;
-                } else {
-                    alert(data.error || 'Failed to join');
-                }
-            } catch (err) {
-                console.error(err);
-                alert('Error joining circle');
-            }
-        }
-        
-        function goToMember() {
-            const memberId = document.getElementById('existingMember').value;
-            if (memberId) {
-                window.location.href = `/c/${circleCode}?user=${memberId}`;
-            }
-        }
-        
-        // Register service worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js')
-                .then(reg => console.log('SW registered'))
-                .catch(err => console.log('SW registration failed:', err));
-        }
-    </script>
-</body>
-</html>
+{% block body %}
+<div class="landing">
+    <div class="landing-icon">🎯</div>
+    <h1 style="font-size: 1.8rem;">Join {{ circle.name }}</h1>
+    <p>You've been invited to a roleplay circle with {{ member_count }} member{{ 's' if member_count != 1 else '' }}.</p>
+
+    {% if user %}
+    <!-- Already logged in, just join -->
+    <div class="card card-flat" style="max-width: 400px; width: 100%; text-align: left;">
+        <p class="text-sm text-muted mb-2">Signing in as <strong>{{ user.name }}</strong></p>
+
+        <div class="form-group">
+            <label class="form-label">Your Zoom Link (optional)</label>
+            <input type="url" id="zoomLink" class="form-input"
+                   placeholder="https://zoom.us/j/..." value="{{ user.zoom_link or '' }}">
+        </div>
+
+        <button onclick="joinCircle()" class="btn btn-primary btn-block btn-lg" id="joinBtn">
+            Join {{ circle.name }}
+        </button>
+
+        <p class="text-sm text-muted text-center mt-2">
+            Not you? <a href="/auth/logout">Sign out</a>
+        </p>
+    </div>
+    {% else %}
+    <!-- Need to log in first -->
+    {% if oauth_configured %}
+    <a href="/auth/google" class="btn btn-google btn-lg">
+        <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Sign in with Google to Join
+    </a>
+    {% else %}
+    <div class="card card-flat" style="max-width: 400px; width: 100%; text-align: left;">
+        <div class="dev-notice">
+            ⚠️ Dev mode - sign in to join this circle
+        </div>
+        <form action="/auth/dev-login" method="POST">
+            <div class="form-group">
+                <label class="form-label">Name</label>
+                <input type="text" name="name" class="form-input" placeholder="Your name" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input type="email" name="email" class="form-input" placeholder="you@company.com" required>
+            </div>
+            <input type="hidden" name="next" value="/join/{{ code }}">
+            <button type="submit" class="btn btn-primary btn-block">Sign In & Join</button>
+        </form>
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function joinCircle() {
+    const zoomLink = document.getElementById('zoomLink')?.value.trim() || '';
+    const btn = document.getElementById('joinBtn');
+    btn.disabled = true;
+    btn.textContent = 'Joining...';
+
+    try {
+        const data = await api('/join/{{ code }}/submit', {
+            method: 'POST',
+            body: { zoom_link: zoomLink }
+        });
+        showToast('Welcome to the circle! 🎉');
+        setTimeout(() => {
+            window.location.href = data.redirect || '/c/{{ code }}';
+        }, 500);
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Join {{ circle.name }}';
+    }
+}
+</script>
+{% endblock %}

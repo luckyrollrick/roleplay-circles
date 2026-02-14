@@ -1,125 +1,80 @@
-# Roleplay Circles
+# 🎯 Roleplay Circles v2
 
-**Status:** Idea / Planning  
-**Created:** 2026-02-13  
-**Origin:** Spin-off from Sales Call AI Assistant concept
+Sales roleplay matching for teams. Create a circle, invite your team, find practice partners instantly — especially when calls no-show.
 
----
+## Features
 
-## The Problem
+- **Google OAuth** — Sign in with Google, calendar integration
+- **Circles** — Create invite-only circles for your team
+- **Availability Toggle** — One tap to say "I'm free for roleplay"
+- **No-Show Detection** — Google Calendar integration flags meetings that started 10+ min ago
+- **Session Tracking** — Log sessions, rate them, track streaks
+- **Leaderboard** — See who's putting in the reps
+- **Mobile-First** — Dark theme UI built for phones between calls
 
-Sales reps want to roleplay but can't commit to fixed times:
-- Scheduled roleplay gets bumped by real calls (always takes priority)
-- Asking "who wants to roleplay now?" in Slack/WhatsApp doesn't work — people are busy at that exact moment
-- There's a mismatch between desire to practice and ability to coordinate
+## Quick Start
 
-**Validated by:** Ricky's own experience with his sales team Slack and a community WhatsApp group. People want to practice, coordination is the blocker.
-
----
-
-## The Solution
-
-**Availability-first matching, not scheduling-first.**
-
-### Core Features
-1. **Calendar sync** — Watches for gaps in your calendar
-2. **Auto-availability windows** — Set hours when you're open for roleplay if calendar is clear (e.g., 10am-6pm)
-3. **No-show trigger** — 10 min into a scheduled call, app asks "did they show?" → if no, flips you to available instantly
-4. **Circle notifications** — When someone becomes available, circle gets pinged
-5. **Quick matching** — Jump into roleplay while you're already warmed up
-
-### The Insight
-The no-show trigger is the unique hook. You're already in call mode, adrenaline up, prospect ghosted — perfect moment to rep instead of scrolling.
-
----
-
-## Go-To-Market Strategy
-
-### Phase 1: Internal Testing
-- Build for Ricky's sales team (5 people)
-- Work out kinks, track performance
-- **Metrics to track:**
-  - Show rate to roleplay when pinged
-  - Session length (5 min vs 30 min)
-  - Repeat usage (habit or novelty?)
-  - Self-reported improvement on real calls
-
-### Phase 2: Roleplay Roulette (Free)
-- Public website, random matching with strangers
-- Low commitment, "try it for fun" framing
-- Viral top-of-funnel play
-- "Sales training" sounds like homework; "Roleplay Roulette" sounds like a game. People share games.
-
-### Phase 3: Private Circles (Paid)
-- Team/community-based circles
-- Full features: calendar sync, no-show triggers, availability windows
-- Performance tracking over time
-- Upsell from roulette users who want it with their actual team
-
----
-
-## Funnel
-
-```
-Free: Roleplay Roulette (strangers, random, viral)
-            ↓
-Paid: Private Circles (team, calendar sync, tracking)
-```
-
----
-
-## Open Questions
-
-- [ ] What's the minimum circle size for reliable matching?
-- [ ] Mobile app vs. web app vs. Slack/Discord bot?
-- [ ] How to handle time zones in circles?
-- [ ] Voice call built-in or redirect to Zoom/phone?
-- [ ] Gamification? Leaderboards? Streak tracking?
-
----
-
-## Competitive Landscape
-
-*To research:*
-- Do Gong, Chorus, or sales training platforms have spontaneous roleplay matching?
-- Existing "find a practice partner" apps in other domains (language learning, etc.)
-
----
-
-## Quick Start (MVP)
-
-### 1. Run the app
 ```bash
-cd projects/roleplay-circles
+# Clone and run
 ./run.sh
+
+# Or manually:
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python app.py
 ```
 
-### 2. Open in browser
-Go to: http://localhost:5050
+Open http://localhost:5050
 
-### 3. Configure your settings
-1. Click ⚙️ Settings
-2. Paste your Google Calendar ICS URL
-   - Get it from: Google Calendar → Settings → [Your calendar] → Integrate calendar → Secret address in iCal format
-3. Add your Zoom link
-4. Set your availability hours
-5. Save
+## Google OAuth Setup
 
-### 4. Get teammate's ICS URL
-Have them send you their ICS URL and add it to `config.json`
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project → APIs & Services → Credentials
+3. Create OAuth 2.0 Client ID (Web application)
+4. Set authorized redirect URI: `http://localhost:5050/auth/callback`
+5. Enable Google Calendar API
+6. Copy `.env.example` to `.env` and fill in credentials:
 
----
+```bash
+cp .env.example .env
+# Edit .env with your client ID and secret
+```
 
-## Next Steps
+**Without OAuth configured**, the app runs in dev mode with a simple name/email login (no Google features).
 
-1. [x] Design MVP feature set for team testing
-2. [x] Decide on tech stack (web app? mobile? bot?)
-3. [x] Build v0.1 for Ricky's team
-4. [ ] Run 30-60 day pilot, collect metrics
-5. [ ] Decide go/no-go on Roulette launch
+## Tech Stack
 
----
+- **Backend:** Flask + SQLite
+- **Auth:** Google OAuth 2.0 (google-auth-oauthlib)
+- **Calendar:** Google Calendar API
+- **Frontend:** Vanilla HTML/CSS/JS (no framework)
+- **Database:** SQLite (data/roleplay_circles.db)
 
-## Notes
+## API Endpoints
 
-*Add ongoing thoughts, learnings, pivots here.*
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Landing page |
+| GET | `/login` | Login page |
+| GET | `/auth/google` | Start OAuth flow |
+| GET | `/auth/callback` | OAuth callback |
+| POST | `/auth/logout` | Logout |
+| GET | `/dashboard` | User dashboard |
+| POST | `/circles/create` | Create circle |
+| GET | `/join/<code>` | Join page |
+| POST | `/join/<code>/submit` | Join circle |
+| GET | `/c/<code>` | Circle view |
+| GET | `/settings` | Settings page |
+| GET | `/api/circle/<code>/status` | Team status |
+| POST | `/api/circle/<code>/available` | Toggle availability |
+| POST | `/api/circle/<code>/noshow` | Mark no-show |
+| POST | `/api/circle/<code>/log-session` | Log session |
+| GET | `/api/circle/<code>/stats` | Stats + leaderboard |
+| GET | `/api/circle/<code>/calendar` | Today's calendar |
+| GET | `/api/circle/<code>/recent-sessions` | Recent sessions |
+| POST | `/api/settings` | Update settings |
+
+## Database Schema
+
+SQLite with tables: `users`, `circles`, `circle_members`, `availability`, `sessions`, `noshow_events`

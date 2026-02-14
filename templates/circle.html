@@ -1,533 +1,501 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#3b82f6">
-    <meta name="description" content="Find roleplay partners on your sales team">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Circles">
-    <title>{{ circle.name }} - Roleplay Circles</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="manifest" href="/static/manifest.json">
-    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-    <link rel="icon" id="favicon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
-</head>
-<body>
-    <div class="widget">
-        <header>
-            <div class="header-left">
-                <h1>🎯 {{ circle.name }}</h1>
-            </div>
-            <div class="user-name">
-                👤 {{ user.name if user else 'Unknown' }}
-            </div>
-        </header>
+{% extends "base.html" %}
+{% block title %}{{ circle.name }} - Roleplay Circles{% endblock %}
 
-        <!-- Notification Banner -->
-        <div id="notification" class="notification hidden">
-            <span id="notificationText"></span>
-            <button onclick="hideNotification()">×</button>
-        </div>
-
-        <!-- Group Session Banner -->
-        <div id="groupBanner" class="group-banner hidden">
-            <div class="group-banner-content">
-                <span class="group-icon">👥</span>
-                <div class="group-info">
-                    <strong id="groupCount">0</strong> people available!
-                    <div id="groupNames" class="group-names"></div>
-                </div>
-                <button class="btn btn-group-join" onclick="joinGroupSession()">Join Session</button>
+{% block nav %}
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="/dashboard" class="nav-brand">
+            <span>🎯</span> <span class="nav-user-name">{{ circle.name }}</span>
+        </a>
+        <div class="nav-links">
+            <a href="/settings" class="btn btn-ghost btn-sm">⚙️</a>
+            <div class="nav-user">
+                {% if user.avatar_url %}
+                <img src="{{ user.avatar_url }}" alt="" class="nav-avatar">
+                {% endif %}
+                <span class="nav-user-name">{{ user.name.split(' ')[0] }}</span>
             </div>
         </div>
+    </div>
+</nav>
+{% endblock %}
 
-        <!-- Availability Status -->
-        <div class="status-bar">
-            <div id="myStatus" class="status-item">
-                <span class="status-dot available"></span>
-                <span>Your status: <strong id="myStatusText">Checking...</strong></span>
-            </div>
-            <div class="status-actions">
-                <button id="availableBtn" class="btn btn-available" onclick="setAvailable()">I'm Available</button>
-                <button id="unavailableBtn" class="btn btn-unavailable hidden" onclick="setUnavailable()">Go Busy</button>
-            </div>
-        </div>
+{% block body %}
+<div class="container page">
 
-        <!-- Team Status -->
-        <div id="teamStatus" class="team-status">
-            <h3>Team <span id="teamCount" class="team-count"></span></h3>
-            <div id="teamList"></div>
-        </div>
-
-        <!-- Current Status / Next Event -->
-        <div class="current-section">
-            <div id="currentStatus">
-                <p class="loading">Checking calendar...</p>
-            </div>
-        </div>
-
-        <!-- Invite Link -->
-        <div class="invite-section">
-            <button class="btn btn-invite" onclick="showInvite()">📨 Invite Teammate</button>
-            <div id="invitePanel" class="invite-panel hidden">
-                <p>Share this link:</p>
-                <div class="invite-link">
-                    <input type="text" id="inviteLinkInput" readonly value="">
-                    <button class="btn btn-copy" onclick="copyInvite()">Copy</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Settings Panel -->
-        <div class="settings-section">
-            <button class="settings-toggle" onclick="toggleSettings()">⚙️ Settings</button>
-            <div id="settingsPanel" class="settings-panel hidden">
-                <div class="setting-row">
-                    <label>Calendar ICS URL:</label>
-                    <input type="text" id="icsUrl" placeholder="Paste your Google Calendar ICS URL">
-                </div>
-                <div class="setting-row">
-                    <label>Your Zoom Link:</label>
-                    <input type="text" id="zoomLink" placeholder="https://zoom.us/j/...">
-                </div>
-                <div class="setting-row">
-                    <label>Availability Window:</label>
-                    <select id="startHour"></select>
-                    <span>to</span>
-                    <select id="endHour"></select>
-                </div>
-                <button class="btn btn-save" onclick="saveSettings()">Save Settings</button>
+    <!-- Availability Toggle -->
+    <div class="card" id="availCard">
+        <div class="toggle-container">
+            <button class="toggle-btn" id="availToggle" onclick="toggleAvailability()"></button>
+            <div>
+                <div class="toggle-label" id="availLabel">Loading...</div>
+                <div class="text-sm text-muted" id="availSub"></div>
             </div>
         </div>
     </div>
 
-    <script>
-        const circleCode = '{{ code }}';
-        const circleName = '{{ circle.name }}';
-        let currentUser = '{{ user.id if user else "" }}';
-        let pollInterval;
-        let availableZoomLinks = [];
-        let lastAvailableCount = 0;
-        let titleBlinkInterval = null;
-        const originalTitle = document.title;
-        
-        // Favicon SVGs
-        const normalFavicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>";
-        const alertFavicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%234ade80'/><circle cx='50' cy='50' r='40' fill='%234ade80' style='filter:drop-shadow(0 0 10px %234ade80)'/></svg>";
-        
-        function updateTabNotification(availableCount, names) {
-            const favicon = document.getElementById('favicon');
-            
-            if (availableCount > 0) {
-                // Change favicon to alert
-                favicon.href = alertFavicon;
-                
-                // Start blinking title if not already
-                if (!titleBlinkInterval) {
-                    let showAlert = true;
-                    titleBlinkInterval = setInterval(() => {
-                        if (showAlert) {
-                            document.title = `🟢 (${availableCount}) ${names.join(', ')} available!`;
-                        } else {
-                            document.title = circleName;
-                        }
-                        showAlert = !showAlert;
-                    }, 1000);
-                }
-            } else {
-                // Reset to normal
-                favicon.href = normalFavicon;
-                document.title = originalTitle;
-                if (titleBlinkInterval) {
-                    clearInterval(titleBlinkInterval);
-                    titleBlinkInterval = null;
-                }
-            }
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('team')">👥 Team</button>
+        <button class="tab" onclick="switchTab('calendar')">📅 Calendar</button>
+        <button class="tab" onclick="switchTab('stats')">📊 Stats</button>
+        <button class="tab" onclick="switchTab('invite')">🔗 Invite</button>
+    </div>
+
+    <!-- Team Tab -->
+    <div class="tab-content active" id="tab-team">
+        <div class="section">
+            <div class="section-title">
+                Team Members <span id="availCount"></span>
+            </div>
+            <div class="member-grid" id="memberGrid">
+                <div class="loading-overlay"><div class="spinner"></div> Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar Tab -->
+    <div class="tab-content" id="tab-calendar">
+        <div class="section">
+            <div class="section-title">Today's Calendar</div>
+            <div id="calendarEvents">
+                <div class="loading-overlay"><div class="spinner"></div> Loading calendar...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Tab -->
+    <div class="tab-content" id="tab-stats">
+        <div class="section">
+            <div class="section-title">Your Stats</div>
+            <div class="stats-grid" id="statsGrid">
+                <div class="loading-overlay"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Leaderboard</div>
+            <div class="card card-flat" id="leaderboard">
+                <div class="loading-overlay"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Recent Sessions</div>
+            <div id="recentSessions">
+                <div class="loading-overlay"><div class="spinner"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invite Tab -->
+    <div class="tab-content" id="tab-invite">
+        <div class="card card-flat">
+            <div class="card-title mb-2">Invite Your Team</div>
+            <p class="text-sm text-muted mb-2">Share this link with teammates to join {{ circle.name }}:</p>
+
+            <div class="invite-box mb-2">
+                <div class="invite-url" id="inviteUrl">Loading...</div>
+                <button onclick="copyInvite()" class="btn btn-primary btn-sm">📋 Copy</button>
+            </div>
+
+            <div class="text-center">
+                <div class="text-xs text-muted">Circle Code</div>
+                <div style="font-size: 1.5rem; font-weight: 800; letter-spacing: 4px; font-family: monospace; color: var(--accent);">
+                    {{ code }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Log Session Modal -->
+<div class="modal-overlay" id="sessionModal">
+    <div class="modal">
+        <div class="modal-title">🎯 Log Roleplay Session</div>
+
+        <div class="form-group">
+            <label class="form-label">Partner</label>
+            <select id="sessionPartner" class="form-input">
+                <option value="">Select partner...</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Duration (minutes)</label>
+            <select id="sessionDuration" class="form-input">
+                <option value="5">5 min</option>
+                <option value="10">10 min</option>
+                <option value="15" selected>15 min</option>
+                <option value="20">20 min</option>
+                <option value="30">30 min</option>
+                <option value="45">45 min</option>
+                <option value="60">60 min</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Rating (optional)</label>
+            <div class="flex gap-1" id="ratingStars">
+                <button onclick="setRating(1)" class="btn btn-ghost btn-sm rating-star">⭐</button>
+                <button onclick="setRating(2)" class="btn btn-ghost btn-sm rating-star">⭐</button>
+                <button onclick="setRating(3)" class="btn btn-ghost btn-sm rating-star">⭐</button>
+                <button onclick="setRating(4)" class="btn btn-ghost btn-sm rating-star">⭐</button>
+                <button onclick="setRating(5)" class="btn btn-ghost btn-sm rating-star">⭐</button>
+            </div>
+        </div>
+
+        <div class="flex gap-1">
+            <button onclick="submitSession()" class="btn btn-green" id="logSessionBtn">Log Session</button>
+            <button onclick="closeModal('sessionModal')" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CIRCLE_CODE = '{{ code }}';
+const MY_ID = {{ user.id }};
+let isAvailable = false;
+let members = [];
+let sessionRating = 0;
+let pollInterval;
+
+// ============ TABS ============
+function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+    event.target.classList.add('active');
+    document.getElementById(`tab-${name}`).classList.add('active');
+
+    if (name === 'calendar') loadCalendar();
+    if (name === 'stats') { loadStats(); loadRecentSessions(); }
+    if (name === 'invite') loadInvite();
+}
+
+// ============ STATUS / TEAM ============
+async function loadStatus() {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/status`);
+        members = data.members;
+        isAvailable = data.my_available;
+
+        // Update toggle
+        const toggle = document.getElementById('availToggle');
+        const label = document.getElementById('availLabel');
+        const sub = document.getElementById('availSub');
+
+        toggle.classList.toggle('active', isAvailable);
+        label.textContent = isAvailable ? "You're Available" : "You're Unavailable";
+        label.classList.toggle('available', isAvailable);
+        sub.textContent = `${data.available_count} of ${data.members.length} available`;
+
+        if (data.group_session_ready && isAvailable) {
+            sub.textContent += ' · Ready to roleplay! 🎯';
         }
-        
-        // Stop blinking when tab is focused
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && titleBlinkInterval) {
-                // User is looking at tab, stop blinking but keep indicator
-                clearInterval(titleBlinkInterval);
-                titleBlinkInterval = null;
-                // Keep the count in title if people still available
-                if (lastAvailableCount > 0) {
-                    document.title = `(${lastAvailableCount}) ${circleName}`;
-                }
-            }
-        });
 
-        document.addEventListener('DOMContentLoaded', () => {
-            loadSettings();
-            loadEvents();
-            loadStatus();
-            loadInviteLink();
-            requestNotificationPermission();
-            pollInterval = setInterval(() => {
-                loadEvents();
-                loadStatus();
-                checkNotifications();
-            }, 15000);
-        });
+        // Update count badge
+        document.getElementById('availCount').textContent =
+            `(${data.available_count}/${data.members.length})`;
 
-        async function requestNotificationPermission() {
-            if (!('Notification' in window)) return;
-            if (Notification.permission === 'default') {
-                await Notification.requestPermission();
-            }
+        // Render members
+        renderMembers(data.members);
+    } catch (err) {
+        console.error('Failed to load status:', err);
+    }
+}
+
+function renderMembers(members) {
+    const grid = document.getElementById('memberGrid');
+    if (!members.length) {
+        grid.innerHTML = '<div class="empty-state"><p>No members yet</p></div>';
+        return;
+    }
+
+    grid.innerHTML = members.map(m => {
+        const initials = m.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        const avatarHtml = m.avatar_url
+            ? `<img src="${m.avatar_url}" alt="" class="member-avatar">`
+            : `<div class="member-avatar">${initials}</div>`;
+
+        const classes = ['member-card'];
+        if (m.available) classes.push('available');
+        if (m.is_me) classes.push('is-me');
+
+        let actions = '';
+        if (m.available && !m.is_me && m.zoom_link) {
+            actions = `<a href="${m.zoom_link}" target="_blank" class="btn btn-green btn-sm" style="margin-top:6px; font-size:0.8rem;">📞 Join Zoom</a>`;
         }
 
-        function sendBrowserNotification(title, body, zoomLink) {
-            if (Notification.permission !== 'granted') return;
-            
-            const notification = new Notification(title, {
-                body: body,
-                icon: '🎯',
-                tag: 'roleplay-available',
-                requireInteraction: true
-            });
-            
-            notification.onclick = function() {
-                window.focus();
-                if (zoomLink) window.open(zoomLink, '_blank');
-                notification.close();
-            };
-        }
-
-        async function loadStatus() {
-            try {
-                const response = await fetch(`/api/circle/${circleCode}/status`);
-                const data = await response.json();
-                
-                const me = data.members.find(u => u.id === currentUser);
-                const others = data.members.filter(u => u.id !== currentUser);
-                
-                document.getElementById('teamCount').textContent = `(${data.members.length})`;
-                
-                if (me) {
-                    const statusText = document.getElementById('myStatusText');
-                    const availBtn = document.getElementById('availableBtn');
-                    const unavailBtn = document.getElementById('unavailableBtn');
-                    const statusDot = document.querySelector('#myStatus .status-dot');
-                    
-                    if (me.available) {
-                        statusText.textContent = 'Available';
-                        statusDot.className = 'status-dot available';
-                        availBtn.classList.add('hidden');
-                        unavailBtn.classList.remove('hidden');
-                    } else {
-                        statusText.textContent = 'Busy';
-                        statusDot.className = 'status-dot busy';
-                        availBtn.classList.remove('hidden');
-                        unavailBtn.classList.add('hidden');
-                    }
-                }
-                
-                // Group banner
-                const groupBanner = document.getElementById('groupBanner');
-                const availableOthers = data.available_members.filter(u => u.id !== currentUser);
-                availableZoomLinks = availableOthers.map(u => u.zoom_link).filter(Boolean);
-                const availableNames = availableOthers.map(u => u.name);
-                
-                if (availableOthers.length >= 1) {
-                    groupBanner.classList.remove('hidden');
-                    document.getElementById('groupCount').textContent = data.available_count;
-                    document.getElementById('groupNames').textContent = availableNames.join(', ');
-                } else {
-                    groupBanner.classList.add('hidden');
-                }
-                
-                // Update tab notification
-                lastAvailableCount = availableOthers.length;
-                updateTabNotification(availableOthers.length, availableNames);
-                
-                // Team list
-                const teamList = document.getElementById('teamList');
-                if (others.length === 0) {
-                    teamList.innerHTML = '<p class="no-team">No teammates yet. Share the invite link!</p>';
-                } else {
-                    teamList.innerHTML = others.map(user => `
-                        <div class="team-member ${user.available ? 'available' : 'busy'}">
-                            <span class="status-dot ${user.available ? 'available' : 'busy'}"></span>
-                            <span class="name">${escapeHtml(user.name)}</span>
-                            ${user.available && user.zoom_link ? `
-                                <a href="${user.zoom_link}" target="_blank" class="btn btn-join">Join</a>
-                            ` : ''}
-                        </div>
-                    `).join('');
-                }
-            } catch (err) {
-                console.error('Error loading status:', err);
-            }
-        }
-
-        async function loadEvents() {
-            if (!currentUser) return;
-            
-            try {
-                const response = await fetch(`/api/circle/${circleCode}/events/${currentUser}`);
-                const data = await response.json();
-                
-                const container = document.getElementById('currentStatus');
-                
-                if (!data.events || data.events.length === 0) {
-                    // No calls - show free status
-                    container.innerHTML = `
-                        <div class="free-status">
-                            <div class="free-icon">✨</div>
-                            <div class="free-text">You're free!</div>
-                            <p class="free-hint">Toggle available above to find roleplay partners</p>
-                        </div>
-                    `;
-                    return;
-                }
-                
-                // Find current or next event
-                const now = new Date();
-                let relevantEvent = null;
-                
-                for (const event of data.events) {
-                    const start = new Date(event.start);
-                    const end = new Date(event.end);
-                    
-                    // Currently in this event or it's coming up within 30 min
-                    if (now >= start && now <= end) {
-                        relevantEvent = event;
-                        relevantEvent.status = 'in_progress';
-                        break;
-                    } else if (start > now && (start - now) < 30 * 60 * 1000) {
-                        relevantEvent = event;
-                        relevantEvent.status = 'upcoming';
-                        break;
-                    }
-                }
-                
-                if (!relevantEvent) {
-                    // Find next future event
-                    for (const event of data.events) {
-                        const start = new Date(event.start);
-                        if (start > now) {
-                            relevantEvent = event;
-                            relevantEvent.status = 'later';
-                            break;
-                        }
-                    }
-                }
-                
-                if (!relevantEvent) {
-                    // All events passed
-                    container.innerHTML = `
-                        <div class="free-status">
-                            <div class="free-icon">✨</div>
-                            <div class="free-text">You're free!</div>
-                            <p class="free-hint">No more calls today</p>
-                        </div>
-                    `;
-                    return;
-                }
-                
-                // Show the relevant event
-                const statusLabel = relevantEvent.status === 'in_progress' ? 'NOW' : 
-                                    relevantEvent.status === 'upcoming' ? 'SOON' : 'NEXT';
-                
-                container.innerHTML = `
-                    <div class="current-event ${relevantEvent.status}">
-                        <div class="event-status-label">${statusLabel}</div>
-                        <div class="event-time">${relevantEvent.start_time} - ${relevantEvent.end_time}</div>
-                        <div class="event-title">${escapeHtml(relevantEvent.summary)}</div>
-                        ${relevantEvent.needs_noshow_prompt && !relevantEvent.marked_noshow ? `
-                            <div class="event-actions">
-                                <span class="prompt-text">Did they show up?</span>
-                                <button class="btn btn-showed" onclick="dismissPrompt(this)">Yes ✓</button>
-                                <button class="btn btn-noshow" onclick="markNoShow('${relevantEvent.uid}')">No-Show</button>
-                            </div>
-                        ` : ''}
-                        ${relevantEvent.marked_noshow ? '<span class="noshow-badge">No-Show ✓</span>' : ''}
+        return `
+            <div class="${classes.join(' ')}">
+                ${avatarHtml}
+                <div class="member-info">
+                    <div class="member-name">${m.name}${m.is_me ? ' (you)' : ''}</div>
+                    <div class="member-status">
+                        <span class="status-dot ${m.available ? 'online' : 'offline'}"></span>
+                        ${m.available ? 'Available' : 'Unavailable'}
                     </div>
-                `;
-            } catch (err) {
-                console.error('Error loading events:', err);
+                    ${actions}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// ============ AVAILABILITY ============
+async function toggleAvailability() {
+    isAvailable = !isAvailable;
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/available`, {
+            method: 'POST',
+            body: { available: isAvailable }
+        });
+        loadStatus();
+
+        if (isAvailable) {
+            showToast("You're now available! 🎯");
+        }
+    } catch (err) {
+        showToast(err.message, 'error');
+        isAvailable = !isAvailable;
+    }
+}
+
+// ============ CALENDAR ============
+async function loadCalendar() {
+    const container = document.getElementById('calendarEvents');
+    container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading...</div>';
+
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/calendar`);
+
+        if (data.error === 'token_expired') {
+            container.innerHTML = `
+                <div class="dev-notice">
+                    Calendar access expired. <a href="/auth/google">Sign in again</a> to refresh.
+                </div>`;
+            return;
+        }
+
+        if (data.error === 'No access token') {
+            container.innerHTML = `
+                <div class="dev-notice">
+                    Calendar not connected. <a href="/auth/google">Sign in with Google</a> to see your calendar.
+                </div>`;
+            return;
+        }
+
+        if (!data.events || !data.events.length) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📅</div>
+                    <p>No events today</p>
+                    <p class="text-sm text-muted">Great time for some roleplay!</p>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = data.events.map(e => `
+            <div class="event-item">
+                <div class="event-time">${e.start_time} - ${e.end_time}</div>
+                <div class="event-title">${e.summary}</div>
+                ${e.needs_noshow_prompt ? `
+                    <div class="event-noshow">
+                        <button onclick="markNoShow('${e.uid}', '${e.summary.replace(/'/g, "\\'")}')"
+                                class="btn btn-danger btn-sm">No-show?</button>
+                    </div>
+                ` : ''}
+            </div>
+        `).join('');
+
+    } catch (err) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p class="text-muted">${err.message}</p>
+            </div>`;
+    }
+}
+
+async function markNoShow(uid, summary) {
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/noshow`, {
+            method: 'POST',
+            body: { event_uid: uid, event_summary: summary }
+        });
+        showToast("No-show marked. You're now available! 🎯");
+        loadStatus();
+        loadCalendar();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+// ============ STATS ============
+async function loadStats() {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/stats`);
+
+        document.getElementById('statsGrid').innerHTML = `
+            <div class="stat-card">
+                <div class="stat-value">${data.my_sessions_this_week}</div>
+                <div class="stat-label">This Week</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${data.my_total_sessions}</div>
+                <div class="stat-label">Total Sessions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${data.my_streak}🔥</div>
+                <div class="stat-label">Day Streak</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${data.my_noshows}</div>
+                <div class="stat-label">No-Shows Caught</div>
+            </div>
+        `;
+
+        // Leaderboard
+        if (data.leaderboard.length) {
+            document.getElementById('leaderboard').innerHTML = data.leaderboard.map((p, i) => `
+                <div class="leaderboard-item">
+                    <div class="leaderboard-rank ${i < 3 ? 'top-' + (i+1) : ''}">
+                        ${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i+1)}
+                    </div>
+                    <div class="leaderboard-name ${p.is_me ? 'is-me' : ''}">${p.name}${p.is_me ? ' (you)' : ''}</div>
+                    <div class="leaderboard-count">${p.sessions}</div>
+                </div>
+            `).join('');
+        } else {
+            document.getElementById('leaderboard').innerHTML = `
+                <div class="empty-state">
+                    <p class="text-sm text-muted">No sessions logged yet. Be the first!</p>
+                </div>`;
+        }
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+async function loadRecentSessions() {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/recent-sessions`);
+        const container = document.getElementById('recentSessions');
+
+        if (!data.sessions.length) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <p class="text-sm text-muted">No sessions yet</p>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = '<div class="card card-flat">' + data.sessions.map(s => `
+            <div class="session-item">
+                <div>
+                    <div class="session-people">${s.user1_name} ↔ ${s.user2_name}</div>
+                    <div class="session-meta">${s.duration_minutes}min${s.rating ? ' · ' + '⭐'.repeat(s.rating) : ''}</div>
+                </div>
+                <div class="session-meta">${timeAgo(s.created_at)}</div>
+            </div>
+        `).join('') + '</div>';
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+// ============ INVITE ============
+async function loadInvite() {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/invite`);
+        document.getElementById('inviteUrl').textContent = data.invite_url;
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function copyInvite() {
+    const url = document.getElementById('inviteUrl').textContent;
+    copyToClipboard(url);
+}
+
+// ============ LOG SESSION ============
+function openLogSession() {
+    const select = document.getElementById('sessionPartner');
+    select.innerHTML = '<option value="">Select partner...</option>';
+    members.filter(m => !m.is_me).forEach(m => {
+        select.innerHTML += `<option value="${m.id}">${m.name}</option>`;
+    });
+    sessionRating = 0;
+    updateRatingStars();
+    document.getElementById('sessionModal').classList.add('active');
+}
+
+function setRating(n) {
+    sessionRating = n;
+    updateRatingStars();
+}
+
+function updateRatingStars() {
+    document.querySelectorAll('.rating-star').forEach((btn, i) => {
+        btn.style.opacity = i < sessionRating ? '1' : '0.3';
+    });
+}
+
+async function submitSession() {
+    const partnerId = document.getElementById('sessionPartner').value;
+    const duration = parseInt(document.getElementById('sessionDuration').value);
+
+    if (!partnerId) return showToast('Select a partner', 'error');
+
+    const btn = document.getElementById('logSessionBtn');
+    btn.disabled = true;
+
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/log-session`, {
+            method: 'POST',
+            body: {
+                partner_id: parseInt(partnerId),
+                duration_minutes: duration,
+                rating: sessionRating
             }
-        }
+        });
+        showToast('Session logged! 🎉');
+        closeModal('sessionModal');
+        loadStatus();
+        btn.disabled = false;
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+    }
+}
 
-        function joinGroupSession() {
-            if (availableZoomLinks.length > 0) {
-                window.open(availableZoomLinks[0], '_blank');
-            }
-        }
+function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+}
 
-        async function setAvailable() {
-            try {
-                const response = await fetch(`/api/circle/${circleCode}/available`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({user_id: currentUser})
-                });
-                const data = await response.json();
-                if (data.success) {
-                    showNotification('🎯 You\'re available!', 'success');
-                    loadStatus();
-                }
-            } catch (err) {
-                console.error('Error:', err);
-            }
-        }
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.classList.remove('active');
+    });
+});
 
-        async function setUnavailable() {
-            try {
-                await fetch(`/api/circle/${circleCode}/unavailable`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({user_id: currentUser})
-                });
-                loadStatus();
-            } catch (err) {
-                console.error('Error:', err);
-            }
-        }
+// ============ INIT ============
+loadStatus();
+loadInvite();
 
-        async function markNoShow(eventUid) {
-            try {
-                await fetch(`/api/circle/${circleCode}/noshow`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({user_id: currentUser, event_uid: eventUid})
-                });
-                showNotification('✅ Marked as no-show. Team notified!', 'success');
-                loadEvents();
-                loadStatus();
-            } catch (err) {
-                console.error('Error:', err);
-            }
-        }
+// Add log session FAB
+const fab = document.createElement('button');
+fab.className = 'btn btn-primary';
+fab.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:50; padding:12px 24px; box-shadow:0 4px 20px rgba(99,102,241,0.4); border-radius:100px;';
+fab.innerHTML = '🎯 Log Session';
+fab.onclick = openLogSession;
+document.body.appendChild(fab);
 
-        function dismissPrompt(btn) {
-            btn.closest('.event').classList.remove('prompt');
-            btn.closest('.event-actions').remove();
-        }
-
-        let seenNotifications = new Set();
-        
-        async function checkNotifications() {
-            try {
-                const response = await fetch(`/api/circle/${circleCode}/notifications`);
-                const data = await response.json();
-                
-                for (const notif of data.notifications) {
-                    if (notif.to_user_id !== currentUser) continue;
-                    
-                    const key = notif.timestamp;
-                    if (seenNotifications.has(key)) continue;
-                    seenNotifications.add(key);
-                    
-                    showNotification(notif.message, 'info');
-                    sendBrowserNotification('🎯 Teammate Available!', notif.message, notif.zoom_link);
-                    
-                    fetch(`/api/circle/${circleCode}/notifications/mark-delivered`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({timestamp: notif.timestamp})
-                    });
-                }
-            } catch (err) {
-                console.error('Error:', err);
-            }
-        }
-
-        async function loadInviteLink() {
-            try {
-                const response = await fetch(`/api/circle/${circleCode}/invite`);
-                const data = await response.json();
-                document.getElementById('inviteLinkInput').value = window.location.origin + data.invite_path;
-            } catch (err) {
-                console.error('Error:', err);
-            }
-        }
-
-        function showInvite() {
-            document.getElementById('invitePanel').classList.toggle('hidden');
-        }
-
-        function copyInvite() {
-            const input = document.getElementById('inviteLinkInput');
-            input.select();
-            document.execCommand('copy');
-            showNotification('📋 Invite link copied!', 'success');
-        }
-
-        function showNotification(message, type = 'info') {
-            const el = document.getElementById('notification');
-            document.getElementById('notificationText').textContent = message;
-            el.className = `notification ${type}`;
-            el.classList.remove('hidden');
-            setTimeout(() => el.classList.add('hidden'), 5000);
-        }
-
-        function hideNotification() {
-            document.getElementById('notification').classList.add('hidden');
-        }
-
-        function toggleSettings() {
-            document.getElementById('settingsPanel').classList.toggle('hidden');
-        }
-
-        async function loadSettings() {
-            const startHour = document.getElementById('startHour');
-            const endHour = document.getElementById('endHour');
-            
-            for (let i = 0; i < 24; i++) {
-                const label = i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i-12} PM`;
-                startHour.innerHTML += `<option value="${i}">${label}</option>`;
-                endHour.innerHTML += `<option value="${i}">${label}</option>`;
-            }
-            
-            // Set defaults from user data
-            {% if user %}
-            document.getElementById('icsUrl').value = '{{ user.ics_url | default("", true) }}';
-            document.getElementById('zoomLink').value = '{{ user.zoom_link | default("", true) }}';
-            document.getElementById('startHour').value = {{ user.start_hour | default(9, true) }};
-            document.getElementById('endHour').value = {{ user.end_hour | default(18, true) }};
-            {% endif %}
-        }
-
-        async function saveSettings() {
-            const settings = {
-                user_id: currentUser,
-                ics_url: document.getElementById('icsUrl').value,
-                zoom_link: document.getElementById('zoomLink').value,
-                start_hour: parseInt(document.getElementById('startHour').value),
-                end_hour: parseInt(document.getElementById('endHour').value)
-            };
-            
-            try {
-                await fetch(`/api/circle/${circleCode}/settings`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(settings)
-                });
-                showNotification('✅ Settings saved!', 'success');
-                toggleSettings();
-                loadEvents();
-            } catch (err) {
-                console.error('Error:', err);
-            }
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        // Register service worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js')
-                .then(reg => console.log('SW registered'))
-                .catch(err => console.log('SW registration failed:', err));
-        }
-    </script>
-</body>
-</html>
+// Poll for updates every 15 seconds
+pollInterval = setInterval(loadStatus, 15000);
+</script>
+{% endblock %}

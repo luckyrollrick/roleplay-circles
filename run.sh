@@ -1,22 +1,24 @@
 #!/bin/bash
-# Roleplay Circles MVP - Startup Script
+# Roleplay Circles v2 - Local Development
 
 cd "$(dirname "$0")"
 
-# Check if virtual environment exists
+# Create venv if needed
 if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
+    echo "📦 Creating virtual environment..."
     python3 -m venv venv
 fi
 
-# Activate and install dependencies
+# Activate and install
 source venv/bin/activate
 pip install -q -r requirements.txt
 
-# Run the app
+# Create data directory
+mkdir -p data
+
 echo ""
-echo "🎯 Starting Roleplay Circles..."
-echo "   Open http://localhost:5050"
-echo "   Press Ctrl+C to stop"
+echo "🎯 Roleplay Circles v2"
+echo "   http://localhost:5050"
 echo ""
+
 python app.py

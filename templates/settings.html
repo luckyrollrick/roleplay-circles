@@ -1,0 +1,422 @@
+{% extends "base.html" %}
+{% block title %}Settings - Roleplay Circles{% endblock %}
+
+{% block nav %}
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="/dashboard" class="nav-brand">
+            <span>🎯</span> Roleplay Circles
+        </a>
+        <div class="nav-links">
+            <a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block body %}
+<div class="container page">
+    <div class="page-title">Settings</div>
+    <div class="page-subtitle">Update your profile and preferences</div>
+
+    <!-- Profile Settings -->
+    <div class="card card-flat">
+        <div class="card-title mb-2">Profile</div>
+
+        <div class="form-group">
+            <label class="form-label">Name</label>
+            <input type="text" id="settingsName" class="form-input"
+                   value="{{ user.name }}" placeholder="Your name">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" value="{{ user.email }}" disabled
+                   style="opacity: 0.5;">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Zoom Link</label>
+            <input type="url" id="settingsZoom" class="form-input"
+                   value="{{ user.zoom_link or '' }}"
+                   placeholder="https://zoom.us/j/...">
+            <div class="text-xs text-muted mt-1">Your personal Zoom meeting link for roleplay sessions</div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Timezone</label>
+            <select id="settingsTimezone" class="form-input">
+                <option value="America/New_York" {{ 'selected' if user.timezone == 'America/New_York' else '' }}>Eastern (ET)</option>
+                <option value="America/Chicago" {{ 'selected' if user.timezone == 'America/Chicago' else '' }}>Central (CT)</option>
+                <option value="America/Denver" {{ 'selected' if user.timezone == 'America/Denver' else '' }}>Mountain (MT)</option>
+                <option value="America/Los_Angeles" {{ 'selected' if user.timezone == 'America/Los_Angeles' else '' }}>Pacific (PT)</option>
+                <option value="America/Phoenix" {{ 'selected' if user.timezone == 'America/Phoenix' else '' }}>Arizona (MST)</option>
+                <option value="Pacific/Honolulu" {{ 'selected' if user.timezone == 'Pacific/Honolulu' else '' }}>Hawaii (HST)</option>
+                <option value="Europe/London" {{ 'selected' if user.timezone == 'Europe/London' else '' }}>London (GMT/BST)</option>
+                <option value="Europe/Berlin" {{ 'selected' if user.timezone == 'Europe/Berlin' else '' }}>Central Europe (CET)</option>
+                <option value="Asia/Tokyo" {{ 'selected' if user.timezone == 'Asia/Tokyo' else '' }}>Tokyo (JST)</option>
+            </select>
+        </div>
+
+        <button onclick="saveProfile()" class="btn btn-primary" id="saveProfileBtn">Save Profile</button>
+    </div>
+
+    <!-- Linked Google Accounts -->
+    <div class="card card-flat mt-2">
+        <div class="card-title mb-2">🔗 Linked Google Accounts</div>
+        <p class="text-sm text-muted mb-2">Link multiple Google accounts to pull calendars from all of them.</p>
+
+        <div id="linkedAccountsList" style="min-height: 40px;">
+            <div class="text-sm text-muted">Loading...</div>
+        </div>
+
+        <a href="/auth/link-google" class="btn btn-secondary btn-sm mt-2">+ Link Another Google Account</a>
+    </div>
+
+    <!-- Calendar Selection -->
+    <div class="card card-flat mt-2" id="calendarSection">
+        <div class="card-title mb-2">📅 Calendars</div>
+        <p class="text-sm text-muted mb-2">Choose which calendars to check for busy time. If ANY selected calendar shows a meeting, you'll show as busy.</p>
+
+        <div id="calendarList" style="min-height: 60px;">
+            <div class="text-sm text-muted" id="calendarLoading">Loading calendars...</div>
+        </div>
+
+        <button onclick="saveCalendars()" class="btn btn-primary mt-2" id="saveCalendarsBtn" style="display:none;">Save Calendar Preferences</button>
+    </div>
+
+    <!-- External ICS Calendars -->
+    <div class="card card-flat mt-2">
+        <div class="card-title mb-2">🌐 External Calendars (ICS)</div>
+        <p class="text-sm text-muted mb-2">Add calendars from Outlook, Apple Calendar, or any service that provides an ICS URL.</p>
+
+        <div id="externalCalendarsList" style="min-height: 40px;">
+            <div class="text-sm text-muted">Loading...</div>
+        </div>
+
+        <div style="margin-top: 12px; padding: 12px; background: var(--bg-hover); border-radius: var(--radius-sm);">
+            <div class="text-sm font-bold mb-1">Add External Calendar</div>
+            <div class="form-group" style="margin-bottom: 8px;">
+                <input type="text" id="extCalName" class="form-input" placeholder="Calendar name (e.g. Work Outlook)">
+            </div>
+            <div class="form-group" style="margin-bottom: 8px;">
+                <input type="url" id="extCalUrl" class="form-input" placeholder="ICS URL (https://...)">
+            </div>
+            <button onclick="addExternalCalendar()" class="btn btn-secondary btn-sm" id="addExtCalBtn">Add Calendar</button>
+        </div>
+    </div>
+
+    <!-- Circle-specific settings -->
+    {% if memberships %}
+    <div class="card card-flat mt-2">
+        <div class="card-title mb-2">Availability Hours</div>
+        <p class="text-sm text-muted mb-2">Set your available hours for each circle (used to show when you're likely free).</p>
+
+        {% for m in memberships %}
+        <div class="mb-2" style="padding: 12px; background: var(--bg-hover); border-radius: var(--radius-sm);">
+            <div class="font-bold text-sm mb-1">{{ m.circle_name }}</div>
+            <div class="flex gap-1 items-center">
+                <select class="form-input circle-start-hour" data-code="{{ m.circle_code }}" style="width: auto;">
+                    {% for h in range(0, 24) %}
+                    <option value="{{ h }}" {{ 'selected' if m.start_hour == h else '' }}>
+                        {{ '%d:00 %s' % (h if h <= 12 else h-12, 'AM' if h < 12 else 'PM') if h != 0 else '12:00 AM' }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <span class="text-muted">to</span>
+                <select class="form-input circle-end-hour" data-code="{{ m.circle_code }}" style="width: auto;">
+                    {% for h in range(0, 24) %}
+                    <option value="{{ h }}" {{ 'selected' if m.end_hour == h else '' }}>
+                        {{ '%d:00 %s' % (h if h <= 12 else h-12, 'AM' if h < 12 else 'PM') if h != 0 else '12:00 AM' }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button onclick="saveCircleHours(this, '{{ m.circle_code }}')" class="btn btn-secondary btn-sm">Save</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Danger Zone -->
+    <div class="card card-flat mt-2">
+        <div class="card-title mb-2" style="color: var(--red);">Account</div>
+        <a href="/auth/logout" class="btn btn-danger btn-sm">Sign Out</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveProfile() {
+    const btn = document.getElementById('saveProfileBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        await api('/api/settings', {
+            method: 'POST',
+            body: {
+                name: document.getElementById('settingsName').value.trim(),
+                zoom_link: document.getElementById('settingsZoom').value.trim(),
+                timezone: document.getElementById('settingsTimezone').value,
+            }
+        });
+        showToast('Settings saved!');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Save Profile';
+}
+
+// Linked Google Accounts
+async function loadLinkedAccounts() {
+    const listEl = document.getElementById('linkedAccountsList');
+    try {
+        const resp = await fetch('/api/linked-accounts');
+        const data = await resp.json();
+
+        if (!data.accounts || data.accounts.length === 0) {
+            listEl.innerHTML = '<div class="text-sm text-muted">No linked accounts. Sign in with Google to get started.</div>';
+            return;
+        }
+
+        let html = '';
+        for (const acct of data.accounts) {
+            const primary = acct.is_primary ? ' <span class="text-xs" style="color:var(--primary);">(primary)</span>' : '';
+            const removeBtn = acct.is_primary ? '' : `<button onclick="removeLinkedAccount(${acct.id})" class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:11px;">Remove</button>`;
+            html += `
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:6px;">
+                    <div>
+                        <span class="text-sm font-bold">${acct.name || acct.email}</span>${primary}
+                        <div class="text-xs text-muted">${acct.email}</div>
+                    </div>
+                    ${removeBtn}
+                </div>
+            `;
+        }
+        listEl.innerHTML = html;
+    } catch (err) {
+        listEl.innerHTML = '<div class="text-sm text-muted">Could not load accounts.</div>';
+    }
+}
+
+async function removeLinkedAccount(id) {
+    if (!confirm('Remove this linked Google account? Its calendars will no longer be checked.')) return;
+    try {
+        await fetch(`/api/linked-accounts/${id}`, { method: 'DELETE' });
+        showToast('Account removed');
+        loadLinkedAccounts();
+        loadCalendars();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+// External ICS Calendars
+async function loadExternalCalendars() {
+    const listEl = document.getElementById('externalCalendarsList');
+    try {
+        const resp = await fetch('/api/external-calendars');
+        const data = await resp.json();
+
+        if (!data.calendars || data.calendars.length === 0) {
+            listEl.innerHTML = '<div class="text-sm text-muted">No external calendars added yet.</div>';
+            return;
+        }
+
+        let html = '';
+        for (const cal of data.calendars) {
+            const colorDot = `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${cal.color};margin-right:8px;vertical-align:middle;"></span>`;
+            const checked = cal.selected ? 'checked' : '';
+            html += `
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:6px;">
+                    <label style="display:flex;align-items:center;cursor:pointer;flex:1;">
+                        <input type="checkbox" ${checked} onchange="toggleExternalCal(${cal.id}, this.checked)"
+                               style="width:18px;height:18px;margin-right:10px;accent-color:var(--primary);">
+                        ${colorDot}
+                        <span class="text-sm">${cal.name}</span>
+                    </label>
+                    <button onclick="removeExternalCalendar(${cal.id})" class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:11px;">Remove</button>
+                </div>
+            `;
+        }
+        listEl.innerHTML = html;
+    } catch (err) {
+        listEl.innerHTML = '<div class="text-sm text-muted">Could not load calendars.</div>';
+    }
+}
+
+async function addExternalCalendar() {
+    const btn = document.getElementById('addExtCalBtn');
+    const name = document.getElementById('extCalName').value.trim();
+    const url = document.getElementById('extCalUrl').value.trim();
+
+    if (!name || !url) {
+        showToast('Name and URL are required', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+
+    try {
+        const resp = await fetch('/api/external-calendars', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, ics_url: url })
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        showToast('Calendar added!');
+        document.getElementById('extCalName').value = '';
+        document.getElementById('extCalUrl').value = '';
+        loadExternalCalendars();
+        loadCalendars();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Add Calendar';
+}
+
+async function toggleExternalCal(id, selected) {
+    try {
+        await fetch(`/api/external-calendars/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selected })
+        });
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+async function removeExternalCalendar(id) {
+    if (!confirm('Remove this external calendar?')) return;
+    try {
+        await fetch(`/api/external-calendars/${id}`, { method: 'DELETE' });
+        showToast('Calendar removed');
+        loadExternalCalendars();
+        loadCalendars();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+// Calendar selection
+let calendarData = [];
+
+async function loadCalendars() {
+    const listEl = document.getElementById('calendarList');
+    const loadingEl = document.getElementById('calendarLoading');
+    const saveBtn = document.getElementById('saveCalendarsBtn');
+
+    try {
+        const resp = await fetch('/api/calendars');
+        const data = await resp.json();
+
+        if (data.error === 'No access token' || data.error === 'token_expired') {
+            listEl.innerHTML = '<div class="text-sm text-muted">Sign in with Google to manage calendars.</div>';
+            return;
+        }
+
+        if (!data.calendars || data.calendars.length === 0) {
+            listEl.innerHTML = '<div class="text-sm text-muted">No calendars found.</div>';
+            return;
+        }
+
+        calendarData = data.calendars.filter(c => c.source !== 'ics'); // ICS managed separately
+        let html = '';
+        let lastAccount = '';
+        for (const cal of calendarData) {
+            // Group header by account
+            if (cal.account_email && cal.account_email !== lastAccount) {
+                lastAccount = cal.account_email;
+                html += `<div class="text-xs text-muted font-bold" style="margin:12px 0 6px 0;text-transform:uppercase;">${cal.account_email}</div>`;
+            }
+            const checked = cal.selected ? 'checked' : '';
+            const primary = cal.primary ? ' <span class="text-xs text-muted">(primary)</span>' : '';
+            const colorDot = cal.color ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${cal.color};margin-right:8px;vertical-align:middle;"></span>` : '';
+            html += `
+                <label style="display:flex;align-items:center;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:6px;cursor:pointer;">
+                    <input type="checkbox" class="cal-checkbox" data-cal-id="${cal.id}" data-account-id="${cal.account_id || ''}" ${checked}
+                           style="width:18px;height:18px;margin-right:10px;accent-color:var(--primary);">
+                    ${colorDot}
+                    <span class="text-sm">${cal.summary}${primary}</span>
+                </label>
+            `;
+        }
+        listEl.innerHTML = html;
+        saveBtn.style.display = 'inline-flex';
+
+    } catch (err) {
+        listEl.innerHTML = '<div class="text-sm text-muted">Could not load calendars.</div>';
+    }
+}
+
+async function saveCalendars() {
+    const btn = document.getElementById('saveCalendarsBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    const checkboxes = document.querySelectorAll('.cal-checkbox');
+    const selections = [];
+    checkboxes.forEach(cb => {
+        const cal = calendarData.find(c => c.id === cb.dataset.calId);
+        selections.push({
+            id: cb.dataset.calId,
+            summary: cal ? cal.summary : '',
+            selected: cb.checked,
+            color: cal ? cal.color : '',
+            account_id: cb.dataset.accountId ? parseInt(cb.dataset.accountId) : null,
+            source: cal ? cal.source : 'google',
+        });
+    });
+
+    try {
+        await api('/api/calendars/select', {
+            method: 'POST',
+            body: { calendars: selections }
+        });
+        showToast('Calendar preferences saved!');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Save Calendar Preferences';
+}
+
+// Load everything on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadLinkedAccounts();
+    loadCalendars();
+    loadExternalCalendars();
+});
+
+async function saveCircleHours(btn, code) {
+    const row = btn.closest('.mb-2');
+    const startHour = parseInt(row.querySelector('.circle-start-hour').value);
+    const endHour = parseInt(row.querySelector('.circle-end-hour').value);
+
+    try {
+        await api('/api/settings', {
+            method: 'POST',
+            body: {
+                circle_code: code,
+                start_hour: startHour,
+                end_hour: endHour,
+            }
+        });
+        showToast('Hours updated!');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+</script>
+{% endblock %}
