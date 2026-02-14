@@ -190,6 +190,12 @@ def create_circle():
     name = data.get('name', '').strip()
     creator_name = data.get('creator_name', '').strip()
     zoom_link = data.get('zoom_link', '').strip()
+    admin_code = data.get('admin_code', '').strip()
+    
+    # Check admin code if set
+    required_code = os.environ.get('ADMIN_CODE', '')
+    if required_code and admin_code != required_code:
+        return jsonify({'error': 'Admin code required to create circles'}), 403
     
     if not name or not creator_name:
         return jsonify({'error': 'Circle name and your name are required'}), 400

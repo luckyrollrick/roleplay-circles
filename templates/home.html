@@ -39,6 +39,11 @@
                 <input type="text" id="zoomLink" placeholder="https://zoom.us/j/...">
             </div>
             
+            <div class="form-group">
+                <label>Admin Code</label>
+                <input type="password" id="adminCode" placeholder="Required to create circles">
+            </div>
+            
             <button class="btn btn-create" onclick="createCircle()">Create Circle</button>
         </div>
         
@@ -58,6 +63,7 @@
             const name = document.getElementById('circleName').value.trim();
             const creatorName = document.getElementById('creatorName').value.trim();
             const zoomLink = document.getElementById('zoomLink').value.trim();
+            const adminCode = document.getElementById('adminCode').value.trim();
             
             if (!name || !creatorName) {
                 alert('Please fill in circle name and your name');
@@ -68,7 +74,7 @@
                 const response = await fetch('/create', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ name, creator_name: creatorName, zoom_link: zoomLink })
+                    body: JSON.stringify({ name, creator_name: creatorName, zoom_link: zoomLink, admin_code: adminCode })
                 });
                 
                 const data = await response.json();
