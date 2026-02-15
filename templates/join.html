@@ -13,9 +13,10 @@
         <p class="text-sm text-muted mb-2">Signing in as <strong>{{ user.name }}</strong></p>
 
         <div class="form-group">
-            <label class="form-label">Your Zoom Link (optional)</label>
+            <label class="form-label">Your Zoom Link <span style="color:var(--red);">*</span></label>
             <input type="url" id="zoomLink" class="form-input"
-                   placeholder="https://zoom.us/j/..." value="{{ user.zoom_link or '' }}">
+                   placeholder="https://zoom.us/j/..." value="{{ user.zoom_link or '' }}" required>
+            <div class="text-xs text-muted mt-1">Required to participate in roleplay sessions</div>
         </div>
 
         <button onclick="joinCircle()" class="btn btn-primary btn-block btn-lg" id="joinBtn">
@@ -65,6 +66,10 @@
 <script>
 async function joinCircle() {
     const zoomLink = document.getElementById('zoomLink')?.value.trim() || '';
+    if (!zoomLink) {
+        showToast('Zoom link is required', 'error');
+        return;
+    }
     const btn = document.getElementById('joinBtn');
     btn.disabled = true;
     btn.textContent = 'Joining...';

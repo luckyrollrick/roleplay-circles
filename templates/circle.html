@@ -5,9 +5,10 @@
 <nav class="nav" style="padding:8px 12px;">
     <div class="nav-inner">
         <a href="/dashboard" class="nav-brand" style="font-size:0.9rem;">
-            <span>🎯</span> {{ circle.name }}
+            <span>🏠</span> {{ circle.name }}
         </a>
         <div class="nav-links">
+            <a href="/dashboard" class="btn btn-ghost btn-sm" style="padding:4px 8px;" title="Home">← Home</a>
             <a href="/settings" class="btn btn-ghost btn-sm" style="padding:4px 8px;">⚙️</a>
         </div>
     </div>
@@ -58,9 +59,9 @@
     </div>
 
     <!-- Compact Actions -->
-    <div style="display:flex; gap:8px;">
+    <div style="display:flex; gap:8px;" id="actionButtons">
         <button onclick="openLogSession()" class="btn btn-secondary btn-sm" style="flex:1; font-size:0.8rem;">🎯 Log Session</button>
-        <button onclick="copyInvite()" class="btn btn-secondary btn-sm" style="flex:1; font-size:0.8rem;">🔗 Invite</button>
+        <button onclick="copyInvite()" class="btn btn-secondary btn-sm" style="flex:1; font-size:0.8rem;" id="inviteBtn">🔗 Invite</button>
     </div>
 
     <!-- Expandable sections -->
@@ -80,6 +81,38 @@
     <details style="margin-top:8px;">
         <summary class="text-xs text-muted" style="cursor:pointer; padding:6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">📋 Recent Sessions</summary>
         <div id="recentSessions" style="padding-top:8px;"></div>
+    </details>
+
+    <!-- Circle Settings (Admin only) -->
+    <details style="margin-top:8px; display:none;" id="adminSettingsSection">
+        <summary class="text-xs text-muted" style="cursor:pointer; padding:6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">⚙️ Circle Settings (Admin)</summary>
+        <div style="padding-top:8px;">
+            <div style="padding:12px; background:var(--bg-card); border:2px solid var(--border); border-radius:var(--radius-sm); margin-bottom:8px;">
+                <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label" style="font-size:0.8rem;">Circle Name</label>
+                    <input type="text" id="settingCircleName" class="form-input" value="{{ circle.name }}" style="font-size:0.85rem;">
+                </div>
+                <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label" style="font-size:0.8rem;">Max Session Size</label>
+                    <select id="settingMaxSize" class="form-input" style="font-size:0.85rem;">
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                        <option value="6">6</option>
+                        <option value="8">8</option>
+                        <option value="10">10</option>
+                    </select>
+                </div>
+                <button onclick="saveCircleSettings()" class="btn btn-primary btn-sm" id="saveSettingsBtn" style="font-size:0.8rem;">Save Settings</button>
+            </div>
+
+            <!-- Member Management -->
+            <div class="text-xs text-muted" style="margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">
+                👥 Members
+            </div>
+            <div id="adminMemberList"></div>
+        </div>
     </details>
 </div>
 
@@ -162,7 +195,9 @@
 const CIRCLE_CODE = '{{ code }}';
 const MY_ID = {{ user.id }};
 let isAvailable = false;
+let isAdmin = false;
 let members = [];
+let maxSessionSize = 4;
 let sessionRating = 0;
 let endSessionRating = 0;
 let pendingInviteTarget = null;
@@ -191,9 +226,8 @@ function showBrowserNotification(title, body) {
             tag: 'roleplay-invite',
             requireInteraction: true,
         });
-        // Try to play a sound
         try {
-            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2JkZeWj4F1bGVnc4GOlpqXjn5xa2Rle4mXoJuShn1xaGNofJCcoZmMgHRpZWp+kZ6gnpKFd21naHuMm6CdlIh7cGtqd4eSm5yYj4N3cG1wfIyYm5mTh3xybm94iJWamZWLf3VwcHWDj5iZl5GGfHNxcnaBjJWYlpKIf3ZzcnR/i5OWlZOKgXl1c3V+iZGUlJKLg3t3dXZ8ho6SkZGLhH15d3d7hIuQkJCLhYB8eXl7goiNj4+MhoJ+e3p7gYaMjo6MhoOAfXt7gIWKjI2MiIWCf317gIKHiouLioiFg4B+foCEh4mKioqIhYOBf36AgoaIiYmJiIaEgoF/gIKEhoeIiImIhoWEgoGAgoOFhoiIiIiHhoWDgoGBgoSFhoeHh4eHhoWEg4KCg4OFhYaGhoeHhoaFhIODgoODhIWFhoeHh4eGhoWEhIODg4OEhYaGh4eHh4eGhoWFhIODhIOEhYWGhoeHh4eHhoaFhYSDhIOEhIWFhoaHh4eHh4eGhoaFhYSEhIOEhIWFhoaHh4eHh4eHhoaGhYWEhISDhISFhYaGh4eHh4eH');
+            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2JkZeWj4F1bGVnc4GOlpqXjn5xa2Rle4mXoJuShn1xaGNofJCcoZmMgHRpZWp+kZ6gnpKFd21naHuMm6CdlIh7cGtqd4eSm5yYj4N3cG1wfIyYm5mTh3xybm94iJWamZWLf3VwcHWDj5iZl5GGfHNxcnaBjJWYlpKIf3ZzcnR/i5OWlZOKgXl1c3V+iZGUlJKLg3t3dXZ8ho6SkZGLhH15d3d7hIuQkJCLhYB8eXl7goiNj4+MhoJ+e3p7gYaMjo6MhoOAfXt7gIWKjI2MiIWCf317gIKHiouLioiFg4B+foCEh4mKioqIhYOBf36AgoaIiYmJiIaEgoF/gIKEhoeIiImIhoWEgoGAgoOFhoiIiIiHhoWDgoGBgoSFhoeHh4eHhoaFhIODgoODhIWFhoeHh4eGhoWEhIODg4OEhYaGh4eHh4eGhoWFhIODhIOEhYWGhoeHh4eHhoaFhYSDhIOEhIWFhoaHh4eHh4eGhoaFhYSEhIOEhIWFhoaHh4eHh4eHhoaGhYWEhISDhISFhYaGh4eHh4eH');
             audio.volume = 0.3;
             audio.play().catch(() => {});
         } catch(e) {}
@@ -201,12 +235,54 @@ function showBrowserNotification(title, body) {
     } catch(e) {}
 }
 
+// ============ HEARTBEAT ============
+function sendHeartbeat() {
+    fetch(`/api/circle/${CIRCLE_CODE}/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+    }).catch(() => {});
+}
+
+// Send heartbeat every 10 seconds
+setInterval(sendHeartbeat, 10000);
+sendHeartbeat(); // Send immediately on load
+
+// ============ BEFOREUNLOAD ============
+window.addEventListener('beforeunload', function(e) {
+    // Use sendBeacon for reliable delivery on tab close
+    const url = `/api/circle/${CIRCLE_CODE}/set-unavailable`;
+    const data = JSON.stringify({});
+    if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, new Blob([data], { type: 'application/json' }));
+    } else {
+        // Fallback: synchronous XHR
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url, false);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(data);
+    }
+});
+
 // ============ STATUS ============
 async function loadStatus() {
     try {
         const data = await api(`/api/circle/${CIRCLE_CODE}/status`);
         members = data.members;
         isAvailable = data.my_available;
+        isAdmin = data.is_admin;
+        maxSessionSize = data.max_session_size || 4;
+
+        // Show/hide admin sections
+        const adminSection = document.getElementById('adminSettingsSection');
+        const inviteBtn = document.getElementById('inviteBtn');
+        if (isAdmin) {
+            adminSection.style.display = 'block';
+            inviteBtn.style.display = '';
+        } else {
+            adminSection.style.display = 'none';
+            inviteBtn.style.display = 'none';
+        }
 
         // Auto-timeout notification
         if (data.auto_timed_out) {
@@ -259,6 +335,11 @@ async function loadStatus() {
                 currentSessionId = null;
                 stopSessionTimer();
             }
+        }
+
+        // Update admin settings if open
+        if (isAdmin) {
+            document.getElementById('settingMaxSize').value = maxSessionSize;
         }
 
     } catch (err) {
@@ -318,7 +399,7 @@ function renderMembers(members, sentPending) {
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span class="status-dot ${dotClass}"></span>
                     <div>
-                        <span style="font-size:0.85rem; font-weight:600;">${m.name}${m.is_me ? ' (you)' : ''}</span>
+                        <span style="font-size:0.85rem; font-weight:600;">${m.name}${m.is_me ? ' (you)' : ''}${m.role === 'admin' ? ' 👑' : ''}</span>
                         ${stateLabel ? '<br>' + stateLabel : ''}
                     </div>
                 </div>
@@ -337,6 +418,8 @@ function renderActiveSessions(sessions, mySession) {
     // Show my session banner if I'm in one
     if (mySession) {
         const memberNames = mySession.members.map(m => m.name).join(' & ');
+        const canEndForAll = isAdmin || mySession.started_by === MY_ID;
+
         banner.style.display = 'block';
         banner.innerHTML = `
             <div style="padding:14px 16px; background:var(--orange-dim); border:2px solid var(--orange); border-radius:var(--radius-sm);">
@@ -346,8 +429,9 @@ function renderActiveSessions(sessions, mySession) {
                 </div>
                 <div style="font-size:0.85rem; margin-bottom:8px;">${memberNames}</div>
                 ${mySession.zoom_link ? `<a href="${mySession.zoom_link}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 12px; font-size:0.75rem; margin-bottom:8px; display:inline-block;">📹 Join Zoom</a>` : ''}
-                <div>
-                    <button onclick="openEndSession(${mySession.id})" class="btn btn-secondary btn-sm" style="font-size:0.75rem;">🏁 End Session</button>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button onclick="leaveSession(${mySession.id})" class="btn btn-secondary btn-sm" style="font-size:0.75rem;">🚪 Leave</button>
+                    ${canEndForAll ? `<button onclick="openEndSession(${mySession.id})" class="btn btn-secondary btn-sm" style="font-size:0.75rem;">🏁 End for All</button>` : ''}
                 </div>
             </div>
         `;
@@ -362,13 +446,23 @@ function renderActiveSessions(sessions, mySession) {
         section.style.display = 'block';
         list.innerHTML = otherSessions.map(s => {
             const names = s.members.map(m => m.name).join(' & ');
+            const memberCount = s.members.length;
+            const isFull = memberCount >= maxSessionSize;
+
+            let joinBtn;
+            if (isFull) {
+                joinBtn = `<span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">Full (${memberCount}/${maxSessionSize})</span>`;
+            } else {
+                joinBtn = `<button onclick="joinSession(${s.id})" class="btn btn-green btn-sm" style="padding:3px 10px; font-size:0.75rem;">Join (${memberCount}/${maxSessionSize})</button>`;
+            }
+
             return `
                 <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg-card); border:2px solid var(--orange); border-radius:var(--radius-sm); margin-bottom:4px; background:var(--orange-dim);">
                     <div>
                         <div style="font-size:0.8rem; font-weight:600;">${names}</div>
                         <div class="text-xs text-muted">Roleplaying now</div>
                     </div>
-                    <button onclick="joinSession(${s.id})" class="btn btn-green btn-sm" style="padding:3px 10px; font-size:0.75rem;">Join</button>
+                    ${joinBtn}
                 </div>
             `;
         }).join('');
@@ -408,7 +502,6 @@ function openInviteModal(userId, userName) {
     document.getElementById('inviteModalBody').textContent = `Send a roleplay invite to ${userName}? They'll have 60 seconds to accept.`;
     document.getElementById('inviteModal').classList.add('active');
 
-    // Request notification permission on first interaction
     requestNotificationPermission();
 }
 
@@ -440,7 +533,6 @@ function renderPendingInvites(invites) {
         return;
     }
 
-    // Check for new invites and trigger notification
     invites.forEach(inv => {
         if (!previousPendingInviteIds.has(inv.id)) {
             showBrowserNotification('🎯 Roleplay Invite!', `${inv.from_name} wants to roleplay with you!`);
@@ -529,17 +621,32 @@ async function joinSession(sessionId) {
     }
 }
 
+// ============ LEAVE SESSION ============
+async function leaveSession(sessionId) {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/leave-session`, {
+            method: 'POST',
+            body: { session_id: sessionId }
+        });
+        showToast(data.session_ended ? 'Session ended (last person left)' : 'Left session');
+        stopSessionTimer();
+        currentSessionId = null;
+        loadStatus();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
 // ============ END SESSION ============
 function openEndSession(sessionId) {
     currentEndSessionId = sessionId;
     endSessionRating = 0;
     updateEndRatingStars();
 
-    // Calculate current duration
     const timerEl = document.getElementById('sessionTimer');
     const duration = timerEl ? timerEl.textContent : '';
 
-    document.getElementById('endSessionBody').textContent = `Session duration: ${duration || 'calculating...'}`;
+    document.getElementById('endSessionBody').textContent = `Session duration: ${duration || 'calculating...'}. This will end the session for everyone.`;
     document.getElementById('endSessionModal').classList.add('active');
 }
 
@@ -613,7 +720,6 @@ async function loadNextCall() {
 
 // ============ AVAILABILITY ============
 async function toggleAvailability() {
-    // Don't toggle if in session
     const myMember = members.find(m => m.is_me);
     if (myMember && myMember.state === 'in_session') {
         showToast('End your session first', 'error');
@@ -738,10 +844,17 @@ async function loadInvite() {
     try {
         const data = await api(`/api/circle/${CIRCLE_CODE}/invite`);
         inviteUrl = data.invite_url;
-    } catch (err) {}
+    } catch (err) {
+        // Not admin or error - hide invite button
+        inviteUrl = '';
+    }
 }
 
 function copyInvite() {
+    if (!isAdmin) {
+        showToast('Only admins can share the invite link', 'error');
+        return;
+    }
     if (inviteUrl) {
         copyToClipboard(inviteUrl);
     } else {
@@ -794,6 +907,63 @@ async function submitSession() {
     btn.disabled = false;
 }
 
+// ============ CIRCLE SETTINGS (Admin) ============
+async function saveCircleSettings() {
+    const btn = document.getElementById('saveSettingsBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/settings`, {
+            method: 'POST',
+            body: {
+                name: document.getElementById('settingCircleName').value.trim(),
+                max_session_size: parseInt(document.getElementById('settingMaxSize').value),
+            }
+        });
+        showToast('Settings saved!');
+        loadStatus();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Save Settings';
+}
+
+async function loadAdminMembers() {
+    if (!isAdmin) return;
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/settings`);
+        const list = document.getElementById('adminMemberList');
+        list.innerHTML = data.members.map(m => {
+            const kickBtn = m.role !== 'admin' && m.id !== MY_ID
+                ? `<button onclick="kickMember(${m.id}, '${m.name.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm" style="padding:2px 8px; font-size:0.7rem;">✕ Kick</button>`
+                : (m.role === 'admin' ? '<span style="font-size:0.7rem; color:var(--text-muted);">👑 Admin</span>' : '');
+            return `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 10px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); margin-bottom:3px; font-size:0.8rem;">
+                    <span>${m.name}</span>
+                    ${kickBtn}
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+async function kickMember(userId, userName) {
+    if (!confirm(`Kick ${userName} from this circle?`)) return;
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/members/${userId}`, {
+            method: 'DELETE',
+        });
+        showToast(`${userName} has been kicked`);
+        loadStatus();
+        loadAdminMembers();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
 function closeModal(id) {
     document.getElementById(id).classList.remove('active');
 }
@@ -812,6 +982,7 @@ document.querySelectorAll('details').forEach(d => {
             if (summary.includes('Stats')) { loadStats(); loadRecentSessions(); }
             if (summary.includes('Calendar')) loadCalendar();
             if (summary.includes('Sessions')) loadRecentSessions();
+            if (summary.includes('Circle Settings')) loadAdminMembers();
         }
     });
 });

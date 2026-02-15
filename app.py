@@ -221,6 +221,19 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_active_sessions_circle ON active_sessions(circle_id, ended_at);
         CREATE INDEX IF NOT EXISTS idx_active_session_members ON active_session_members(user_id);
     ''')
+
+    # Add new columns with ALTER TABLE (safe for existing DBs)
+    alter_statements = [
+        "ALTER TABLE circles ADD COLUMN max_session_size INTEGER DEFAULT 4",
+        "ALTER TABLE circle_members ADD COLUMN last_seen TIMESTAMP",
+        "ALTER TABLE active_sessions ADD COLUMN started_by INTEGER REFERENCES users(id)",
+    ]
+    for stmt in alter_statements:
+        try:
+            conn.execute(stmt)
+        except Exception:
+            pass  # Column already exists
+
     conn.commit()
     conn.close()
 
@@ -520,6 +533,13 @@ def create_circle():
     if not name:
         return jsonify({'error': 'Circle name is required'}), 400
 
+    # Check ADMIN_CODE if set
+    admin_code = os.environ.get('ADMIN_CODE', '').strip()
+    if admin_code:
+        provided_code = data.get('admin_code', '').strip()
+        if provided_code != admin_code:
+            return jsonify({'error': 'Invalid admin code'}), 403
+
     code = generate_code()
     db = get_db()
 
@@ -600,11 +620,16 @@ def join_circle(code):
     if existing:
         return jsonify({'success': True, 'redirect': url_for('circle_view', code=code)})
 
-    # Get zoom link from request
+    # Get zoom link from request (required)
     data = request.json or {}
-    zoom_link = data.get('zoom_link', '')
+    zoom_link = data.get('zoom_link', '').strip()
+
+    if not zoom_link and not user['zoom_link']:
+        return jsonify({'error': 'Zoom link is required'}), 400
 
     if zoom_link and not user['zoom_link']:
+        db.execute('UPDATE users SET zoom_link = ? WHERE id = ?', (zoom_link, user['id']))
+    elif zoom_link:
         db.execute('UPDATE users SET zoom_link = ? WHERE id = ?', (zoom_link, user['id']))
 
     db.execute(
@@ -727,10 +752,43 @@ def circle_status(code):
             except (ValueError, TypeError):
                 pass
 
+    # Presence detection: auto-set stale users unavailable (last_seen > 30s ago)
+    db.execute('''
+        UPDATE availability SET available = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE circle_id = ? AND available = 1 AND user_id IN (
+            SELECT cm.user_id FROM circle_members cm
+            WHERE cm.circle_id = ? AND cm.last_seen IS NOT NULL
+            AND cm.last_seen <= datetime('now', '-30 seconds')
+        )
+    ''', (circle['id'], circle['id']))
+
+    # Also remove stale users from active sessions
+    stale_session_members = db.execute('''
+        SELECT asm.session_id, asm.user_id FROM active_session_members asm
+        JOIN active_sessions s ON s.id = asm.session_id
+        JOIN circle_members cm ON cm.circle_id = s.circle_id AND cm.user_id = asm.user_id
+        WHERE s.circle_id = ? AND s.ended_at IS NULL
+        AND cm.last_seen IS NOT NULL AND cm.last_seen <= datetime('now', '-30 seconds')
+    ''', (circle['id'],)).fetchall()
+
+    for stale in stale_session_members:
+        db.execute('DELETE FROM active_session_members WHERE session_id = ? AND user_id = ?',
+                   (stale['session_id'], stale['user_id']))
+        # Check if session is now empty
+        remaining = db.execute('SELECT COUNT(*) as cnt FROM active_session_members WHERE session_id = ?',
+                               (stale['session_id'],)).fetchone()['cnt']
+        if remaining == 0:
+            # End the session and auto-log it
+            sess = db.execute('SELECT * FROM active_sessions WHERE id = ?', (stale['session_id'],)).fetchone()
+            if sess:
+                db.execute('UPDATE active_sessions SET ended_at = CURRENT_TIMESTAMP WHERE id = ?', (stale['session_id'],))
+
+    db.commit()
+
     # Get users currently in active sessions for this circle
     in_session_users = set()
     active_session_rows = db.execute('''
-        SELECT s.id, s.zoom_link, s.started_at, m.user_id
+        SELECT s.id, s.zoom_link, s.started_at, s.started_by, m.user_id
         FROM active_sessions s
         JOIN active_session_members m ON m.session_id = s.id
         WHERE s.circle_id = ? AND s.ended_at IS NULL
@@ -779,6 +837,13 @@ def circle_status(code):
         }
         member_list.append(member_data)
 
+    # Check current user's role
+    my_membership = db.execute(
+        'SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?',
+        (circle['id'], user['id'])
+    ).fetchone()
+    is_admin = my_membership and my_membership['role'] == 'admin'
+
     # Build active sessions list
     active_sessions_map = {}
     for row in active_session_rows:
@@ -788,6 +853,7 @@ def circle_status(code):
                 'id': sid,
                 'zoom_link': row['zoom_link'],
                 'started_at': row['started_at'],
+                'started_by': row['started_by'],
                 'members': [],
             }
         # Find member name
@@ -863,6 +929,8 @@ def circle_status(code):
         'pending_invites': pending_invites_list,
         'sent_pending_invites': sent_pending_list,
         'auto_timed_out': auto_timed_out,
+        'max_session_size': circle['max_session_size'] if 'max_session_size' in circle.keys() else 4,
+        'is_admin': is_admin,
     })
 
 
@@ -879,6 +947,10 @@ def toggle_available(code):
 
     data = request.json or {}
     available = data.get('available', True)
+
+    # Check zoom link when going available
+    if available and not user['zoom_link']:
+        return jsonify({'error': 'Add your Zoom link in Settings first'}), 400
 
     db.execute('''
         INSERT INTO availability (user_id, circle_id, available, updated_at)
@@ -1072,10 +1144,10 @@ def respond_invite(code):
 
     zoom_link = invite['zoom_link']
 
-    # Create active session
+    # Create active session (started_by is the inviter)
     cursor = db.execute('''
-        INSERT INTO active_sessions (circle_id, zoom_link) VALUES (?, ?)
-    ''', (circle['id'], zoom_link))
+        INSERT INTO active_sessions (circle_id, zoom_link, started_by) VALUES (?, ?, ?)
+    ''', (circle['id'], zoom_link, invite['from_user_id']))
     session_id = cursor.lastrowid
 
     # Add both users
@@ -1128,12 +1200,21 @@ def join_session(code):
     if not active_sess:
         return jsonify({'error': 'Session not found or already ended'}), 404
 
+    # Check max session size
+    max_size = circle['max_session_size'] if 'max_session_size' in circle.keys() else 4
+    current_count = db.execute(
+        'SELECT COUNT(*) as cnt FROM active_session_members WHERE session_id = ?',
+        (session_id,)
+    ).fetchone()['cnt']
+
     # Check if already in session
     existing = db.execute('''
         SELECT * FROM active_session_members WHERE session_id = ? AND user_id = ?
     ''', (session_id, user['id'])).fetchone()
 
     if not existing:
+        if current_count >= max_size:
+            return jsonify({'error': f'Session is full ({current_count}/{max_size})'}), 400
         db.execute('''
             INSERT INTO active_session_members (session_id, user_id) VALUES (?, ?)
         ''', (session_id, user['id']))
@@ -1971,11 +2052,20 @@ def update_settings():
 @app.route('/api/circle/<code>/invite')
 @login_required
 def get_invite(code):
-    """Get invite link info."""
+    """Get invite link info. Only admins can see the invite link."""
+    user = get_current_user()
     db = get_db()
     circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
     if not circle:
         return jsonify({'error': 'Circle not found'}), 404
+
+    # Check if user is admin
+    membership = db.execute(
+        'SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?',
+        (circle['id'], user['id'])
+    ).fetchone()
+    if not membership or membership['role'] != 'admin':
+        return jsonify({'error': 'Only admins can share the invite link'}), 403
 
     member_count = db.execute(
         'SELECT COUNT(*) as cnt FROM circle_members WHERE circle_id = ?',
@@ -2019,6 +2109,269 @@ def recent_sessions(code):
     } for r in rows]
 
     return jsonify({'sessions': sessions_list})
+
+
+# ============ LEAVE SESSION ============
+
+@app.route('/api/circle/<code>/leave-session', methods=['POST'])
+@login_required
+def leave_session(code):
+    """Leave an active session (without ending it for everyone)."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    data = request.json or {}
+    session_id = data.get('session_id')
+
+    if not session_id:
+        return jsonify({'error': 'Session ID is required'}), 400
+
+    active_sess = db.execute('''
+        SELECT * FROM active_sessions WHERE id = ? AND circle_id = ? AND ended_at IS NULL
+    ''', (session_id, circle['id'])).fetchone()
+
+    if not active_sess:
+        return jsonify({'error': 'Session not found or already ended'}), 404
+
+    # Verify user is in session
+    membership = db.execute('''
+        SELECT * FROM active_session_members WHERE session_id = ? AND user_id = ?
+    ''', (session_id, user['id'])).fetchone()
+    if not membership:
+        return jsonify({'error': 'You are not in this session'}), 400
+
+    # Remove user from session
+    db.execute('DELETE FROM active_session_members WHERE session_id = ? AND user_id = ?',
+               (session_id, user['id']))
+
+    # Set user unavailable
+    db.execute('''
+        UPDATE availability SET available = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND circle_id = ?
+    ''', (user['id'], circle['id']))
+
+    # Check if session is now empty
+    remaining = db.execute('SELECT COUNT(*) as cnt FROM active_session_members WHERE session_id = ?',
+                           (session_id,)).fetchone()['cnt']
+
+    if remaining == 0:
+        # End the session and auto-log it
+        db.execute('UPDATE active_sessions SET ended_at = CURRENT_TIMESTAMP WHERE id = ?', (session_id,))
+
+        # Calculate duration for logging
+        started_at = datetime.strptime(active_sess['started_at'], '%Y-%m-%d %H:%M:%S')
+        duration_minutes = max(1, int((datetime.utcnow() - started_at).total_seconds() / 60))
+
+        # Log a session entry for the leaving user (solo session)
+        db.execute('''
+            INSERT INTO sessions (circle_id, user1_id, user2_id, duration_minutes, rating, notes)
+            VALUES (?, ?, ?, ?, 0, 'Auto-logged: last person left')
+        ''', (circle['id'], user['id'], user['id'], duration_minutes))
+
+    db.commit()
+
+    return jsonify({'success': True, 'session_ended': remaining == 0})
+
+
+# ============ HEARTBEAT ============
+
+@app.route('/api/circle/<code>/heartbeat', methods=['POST'])
+@login_required
+def heartbeat(code):
+    """Update last_seen timestamp for presence detection."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    db.execute('''
+        UPDATE circle_members SET last_seen = CURRENT_TIMESTAMP
+        WHERE circle_id = ? AND user_id = ?
+    ''', (circle['id'], user['id']))
+    db.commit()
+
+    return jsonify({'success': True})
+
+
+# ============ SET UNAVAILABLE (for beforeunload) ============
+
+@app.route('/api/circle/<code>/set-unavailable', methods=['POST'])
+@login_required
+def set_unavailable(code):
+    """Set user unavailable and leave any active session. Used by beforeunload."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    # Set unavailable
+    db.execute('''
+        UPDATE availability SET available = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND circle_id = ?
+    ''', (user['id'], circle['id']))
+
+    # Remove from any active sessions in this circle
+    active_memberships = db.execute('''
+        SELECT asm.session_id FROM active_session_members asm
+        JOIN active_sessions s ON s.id = asm.session_id
+        WHERE asm.user_id = ? AND s.circle_id = ? AND s.ended_at IS NULL
+    ''', (user['id'], circle['id'])).fetchall()
+
+    for am in active_memberships:
+        db.execute('DELETE FROM active_session_members WHERE session_id = ? AND user_id = ?',
+                   (am['session_id'], user['id']))
+        # Check if session is now empty
+        remaining = db.execute('SELECT COUNT(*) as cnt FROM active_session_members WHERE session_id = ?',
+                               (am['session_id'],)).fetchone()['cnt']
+        if remaining == 0:
+            db.execute('UPDATE active_sessions SET ended_at = CURRENT_TIMESTAMP WHERE id = ?', (am['session_id'],))
+
+    db.commit()
+    return jsonify({'success': True})
+
+
+# ============ KICK MEMBER (Admin) ============
+
+@app.route('/api/circle/<code>/members/<int:user_id>', methods=['DELETE'])
+@login_required
+def kick_member(code, user_id):
+    """Kick a member from the circle. Admin only."""
+    current_user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    # Check admin
+    my_membership = db.execute(
+        'SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?',
+        (circle['id'], current_user['id'])
+    ).fetchone()
+    if not my_membership or my_membership['role'] != 'admin':
+        return jsonify({'error': 'Only admins can kick members'}), 403
+
+    # Can't kick yourself
+    if user_id == current_user['id']:
+        return jsonify({'error': "You can't kick yourself"}), 400
+
+    # Can't kick other admins
+    target_membership = db.execute(
+        'SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?',
+        (circle['id'], user_id)
+    ).fetchone()
+    if not target_membership:
+        return jsonify({'error': 'User not in this circle'}), 404
+    if target_membership['role'] == 'admin':
+        return jsonify({'error': "Can't kick another admin"}), 400
+
+    # Remove from active sessions
+    db.execute('''
+        DELETE FROM active_session_members WHERE user_id = ? AND session_id IN (
+            SELECT id FROM active_sessions WHERE circle_id = ? AND ended_at IS NULL
+        )
+    ''', (user_id, circle['id']))
+
+    # Remove availability
+    db.execute('DELETE FROM availability WHERE user_id = ? AND circle_id = ?', (user_id, circle['id']))
+
+    # Remove from circle
+    db.execute('DELETE FROM circle_members WHERE circle_id = ? AND user_id = ?', (circle['id'], user_id))
+
+    db.commit()
+    return jsonify({'success': True})
+
+
+# ============ CIRCLE SETTINGS (Admin) ============
+
+@app.route('/api/circle/<code>/settings', methods=['GET'])
+@login_required
+def get_circle_settings(code):
+    """Get circle settings. Admin only."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    membership = db.execute(
+        'SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?',
+        (circle['id'], user['id'])
+    ).fetchone()
+    if not membership or membership['role'] != 'admin':
+        return jsonify({'error': 'Only admins can view settings'}), 403
+
+    # Get members list for admin management
+    members = db.execute('''
+        SELECT u.id, u.name, u.email, cm.role, cm.joined_at
+        FROM circle_members cm
+        JOIN users u ON u.id = cm.user_id
+        WHERE cm.circle_id = ?
+        ORDER BY cm.role DESC, u.name
+    ''', (circle['id'],)).fetchall()
+
+    member_list = [{
+        'id': m['id'],
+        'name': m['name'],
+        'email': m['email'],
+        'role': m['role'],
+        'joined_at': m['joined_at'],
+    } for m in members]
+
+    return jsonify({
+        'name': circle['name'],
+        'max_session_size': circle['max_session_size'] if 'max_session_size' in circle.keys() else 4,
+        'members': member_list,
+    })
+
+
+@app.route('/api/circle/<code>/settings', methods=['POST'])
+@login_required
+def update_circle_settings(code):
+    """Update circle settings. Admin only."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    membership = db.execute(
+        'SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?',
+        (circle['id'], user['id'])
+    ).fetchone()
+    if not membership or membership['role'] != 'admin':
+        return jsonify({'error': 'Only admins can update settings'}), 403
+
+    data = request.json or {}
+
+    if 'name' in data and data['name'].strip():
+        db.execute('UPDATE circles SET name = ? WHERE id = ?', (data['name'].strip(), circle['id']))
+
+    if 'max_session_size' in data:
+        max_size = max(2, min(20, int(data['max_session_size'])))
+        db.execute('UPDATE circles SET max_session_size = ? WHERE id = ?', (max_size, circle['id']))
+
+    db.commit()
+    return jsonify({'success': True})
+
+
+# ============ ADMIN CODE CHECK ============
+
+@app.route('/api/admin-code-required')
+def admin_code_required():
+    """Check if an admin code is required to create circles."""
+    admin_code = os.environ.get('ADMIN_CODE', '').strip()
+    return jsonify({'required': bool(admin_code)})
 
 
 # ============ ERROR HANDLERS ============

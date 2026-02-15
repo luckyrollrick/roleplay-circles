@@ -5,10 +5,10 @@
 <nav class="nav">
     <div class="nav-inner">
         <a href="/dashboard" class="nav-brand">
-            <span>🎯</span> Roleplay Circles
+            <span>🏠</span> Roleplay Circles
         </a>
         <div class="nav-links">
-            <a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a>
+            <a href="/dashboard" class="btn btn-ghost btn-sm">← Home</a>
         </div>
     </div>
 </nav>
@@ -36,11 +36,11 @@
         </div>
 
         <div class="form-group">
-            <label class="form-label">Zoom Link</label>
+            <label class="form-label">Zoom Link <span style="color:var(--red);">*</span></label>
             <input type="url" id="settingsZoom" class="form-input"
                    value="{{ user.zoom_link or '' }}"
-                   placeholder="https://zoom.us/j/...">
-            <div class="text-xs text-muted mt-1">Your personal Zoom meeting link for roleplay sessions</div>
+                   placeholder="https://zoom.us/j/..." required>
+            <div class="text-xs text-muted mt-1">⚠️ Required — you need a Zoom link to go available in circles</div>
         </div>
 
         <div class="form-group">

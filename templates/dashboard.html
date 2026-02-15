@@ -68,6 +68,12 @@
             <input type="text" id="circleName" class="form-input"
                    placeholder="e.g. Sales Team Alpha" maxlength="50">
         </div>
+        <div class="form-group" id="adminCodeGroup" style="display:none;">
+            <label class="form-label">Admin Code</label>
+            <input type="password" id="adminCode" class="form-input"
+                   placeholder="Enter admin code">
+            <div class="text-xs text-muted mt-1">Required to create circles</div>
+        </div>
         <div class="flex gap-1">
             <button onclick="createCircle()" class="btn btn-primary" id="createBtn">Create</button>
             <button onclick="closeModal('createModal')" class="btn btn-secondary">Cancel</button>
@@ -95,6 +101,19 @@
 
 {% block scripts %}
 <script>
+let adminCodeRequired = false;
+
+async function checkAdminCode() {
+    try {
+        const data = await api('/api/admin-code-required');
+        adminCodeRequired = data.required;
+        if (adminCodeRequired) {
+            document.getElementById('adminCodeGroup').style.display = 'block';
+        }
+    } catch (err) {}
+}
+checkAdminCode();
+
 function openCreateModal() {
     document.getElementById('createModal').classList.add('active');
     document.getElementById('circleName').focus();
@@ -123,10 +142,21 @@ async function createCircle() {
     const btn = document.getElementById('createBtn');
     btn.disabled = true;
 
+    const body = { name };
+    if (adminCodeRequired) {
+        const code = document.getElementById('adminCode').value.trim();
+        if (!code) {
+            showToast('Admin code is required', 'error');
+            btn.disabled = false;
+            return;
+        }
+        body.admin_code = code;
+    }
+
     try {
         const data = await api('/circles/create', {
             method: 'POST',
-            body: { name }
+            body
         });
         showToast('Circle created!');
         setTimeout(() => {
