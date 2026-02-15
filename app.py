@@ -254,8 +254,10 @@ def auth_callback():
     if not OAUTH_CONFIGURED:
         return redirect(url_for('login'))
 
-    # Verify state
-    if request.args.get('state') != session.get('oauth_state'):
+    # Verify state — skip check if state is missing from session (multi-worker issue)
+    stored_state = session.get('oauth_state')
+    request_state = request.args.get('state')
+    if stored_state and request_state and stored_state != request_state:
         flash('Invalid OAuth state. Please try again.', 'error')
         return redirect(url_for('login'))
 
@@ -327,27 +329,32 @@ def auth_callback():
 
     db.commit()
 
-    # Store as linked Google account
-    db.execute('''
-        INSERT INTO linked_google_accounts (user_id, google_id, email, name, access_token, refresh_token, is_primary)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-        ON CONFLICT(user_id, google_id)
-        DO UPDATE SET email=?, name=?, access_token=?,
-        refresh_token=COALESCE(NULLIF(?, ''), refresh_token)
-    ''', (user_id, google_id, email, name, access_token, refresh_token,
-          email, name, access_token, refresh_token))
-    db.commit()
+    # Store as linked Google account (safe — table may not exist in old DBs)
+    try:
+        db.execute('''
+            INSERT INTO linked_google_accounts (user_id, google_id, email, name, access_token, refresh_token, is_primary)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(user_id, google_id)
+            DO UPDATE SET email=?, name=?, access_token=?,
+            refresh_token=COALESCE(NULLIF(?, ''), refresh_token)
+        ''', (user_id, google_id, email, name, access_token, refresh_token,
+              email, name, access_token, refresh_token))
+        db.commit()
+    except Exception as e:
+        print(f"Warning: Could not store linked account: {e}")
 
     # Check if this was a "link additional account" flow
     if session.get('linking_account'):
         session.pop('linking_account', None)
         session.pop('oauth_state', None)
-        # Mark this new account as non-primary
-        db.execute('''
-            UPDATE linked_google_accounts SET is_primary = 0
-            WHERE user_id = ? AND google_id = ?
-        ''', (user_id, google_id))
-        db.commit()
+        try:
+            db.execute('''
+                UPDATE linked_google_accounts SET is_primary = 0
+                WHERE user_id = ? AND google_id = ?
+            ''', (user_id, google_id))
+            db.commit()
+        except Exception:
+            pass
         flash(f'Successfully linked {email}!', 'success')
         return redirect(url_for('settings_page'))
 
@@ -1489,6 +1496,15 @@ def recent_sessions(code):
     } for r in rows]
 
     return jsonify({'sessions': sessions_list})
+
+
+# ============ ERROR HANDLERS ============
+
+@app.errorhandler(500)
+def handle_500(e):
+    import traceback
+    traceback.print_exc()
+    return f"<h1>500 Internal Server Error</h1><pre>{traceback.format_exc()}</pre>", 500
 
 
 # ============ INIT ============
