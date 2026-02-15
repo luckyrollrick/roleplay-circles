@@ -1518,6 +1518,16 @@ def handle_500(e):
     return f"<h1>500 Internal Server Error</h1><pre>{traceback.format_exc()}</pre>", 500
 
 
+# ============ LEGAL PAGES ============
+
+@app.route('/privacy')
+def privacy():
+    return render_template('privacy.html')
+
+@app.route('/terms')
+def terms():
+    return render_template('terms.html')
+
 # ============ INIT ============
 
 init_db()
