@@ -183,12 +183,43 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
+        CREATE TABLE IF NOT EXISTS roleplay_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            circle_id INTEGER REFERENCES circles(id) ON DELETE CASCADE,
+            from_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            to_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'declined', 'expired')),
+            decline_reason TEXT DEFAULT '',
+            zoom_link TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            responded_at TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS active_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            circle_id INTEGER REFERENCES circles(id) ON DELETE CASCADE,
+            zoom_link TEXT DEFAULT '',
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ended_at TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS active_session_members (
+            session_id INTEGER REFERENCES active_sessions(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (session_id, user_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_circles_code ON circles(code);
         CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_sessions_circle ON sessions(circle_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at);
         CREATE INDEX IF NOT EXISTS idx_user_calendars_user ON user_calendars(user_id);
+        CREATE INDEX IF NOT EXISTS idx_roleplay_invites_to ON roleplay_invites(to_user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_roleplay_invites_from ON roleplay_invites(from_user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_active_sessions_circle ON active_sessions(circle_id, ended_at);
+        CREATE INDEX IF NOT EXISTS idx_active_session_members ON active_session_members(user_id);
     ''')
     conn.commit()
     conn.close()
@@ -644,7 +675,7 @@ def settings_page():
 @app.route('/api/circle/<code>/status')
 @login_required
 def circle_status(code):
-    """Get circle status with member availability."""
+    """Get circle status with member availability, active sessions, and pending invites."""
     user = get_current_user()
     db = get_db()
 
@@ -652,6 +683,62 @@ def circle_status(code):
     if not circle:
         return jsonify({'error': 'Circle not found'}), 404
 
+    # Auto-expire pending invites older than 60 seconds
+    db.execute('''
+        UPDATE roleplay_invites SET status = 'expired'
+        WHERE status = 'pending' AND circle_id = ?
+        AND created_at <= datetime('now', '-60 seconds')
+    ''', (circle['id'],))
+    db.commit()
+
+    # Auto-timeout: if user has been available for 2+ hours with no activity, set unavailable
+    auto_timed_out = False
+    my_avail = db.execute(
+        'SELECT available, updated_at FROM availability WHERE user_id = ? AND circle_id = ?',
+        (user['id'], circle['id'])
+    ).fetchone()
+    if my_avail and my_avail['available']:
+        updated_at = my_avail['updated_at']
+        if updated_at:
+            try:
+                avail_time = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                if datetime.utcnow() - avail_time > timedelta(hours=2):
+                    # Check for recent activity (invites sent/received or sessions)
+                    recent_activity = db.execute('''
+                        SELECT COUNT(*) as cnt FROM roleplay_invites
+                        WHERE circle_id = ? AND (from_user_id = ? OR to_user_id = ?)
+                        AND created_at >= datetime('now', '-2 hours')
+                    ''', (circle['id'], user['id'], user['id'])).fetchone()['cnt']
+
+                    recent_sessions = db.execute('''
+                        SELECT COUNT(*) as cnt FROM active_sessions s
+                        JOIN active_session_members m ON m.session_id = s.id
+                        WHERE s.circle_id = ? AND m.user_id = ?
+                        AND s.started_at >= datetime('now', '-2 hours')
+                    ''', (circle['id'], user['id'])).fetchone()['cnt']
+
+                    if recent_activity == 0 and recent_sessions == 0:
+                        db.execute('''
+                            UPDATE availability SET available = 0, updated_at = CURRENT_TIMESTAMP
+                            WHERE user_id = ? AND circle_id = ?
+                        ''', (user['id'], circle['id']))
+                        db.commit()
+                        auto_timed_out = True
+            except (ValueError, TypeError):
+                pass
+
+    # Get users currently in active sessions for this circle
+    in_session_users = set()
+    active_session_rows = db.execute('''
+        SELECT s.id, s.zoom_link, s.started_at, m.user_id
+        FROM active_sessions s
+        JOIN active_session_members m ON m.session_id = s.id
+        WHERE s.circle_id = ? AND s.ended_at IS NULL
+    ''', (circle['id'],)).fetchall()
+    for row in active_session_rows:
+        in_session_users.add(row['user_id'])
+
+    # Get members
     members = db.execute('''
         SELECT u.id, u.name, u.avatar_url, u.zoom_link,
                cm.start_hour, cm.end_hour, cm.role,
@@ -670,21 +757,95 @@ def circle_status(code):
         now = datetime.now(tz)
         in_window = m['start_hour'] <= now.hour < m['end_hour']
 
+        # Determine state: in_session, available, or unavailable
+        if m['id'] in in_session_users:
+            state = 'in_session'
+        elif m['available']:
+            state = 'available'
+            available_count += 1
+        else:
+            state = 'unavailable'
+
         member_data = {
             'id': m['id'],
             'name': m['name'],
             'avatar_url': m['avatar_url'] or '',
             'zoom_link': m['zoom_link'] or '',
-            'available': bool(m['available']),
+            'available': state == 'available',
+            'state': state,
             'in_availability_window': in_window,
             'role': m['role'],
             'is_me': m['id'] == user['id'],
         }
         member_list.append(member_data)
-        if m['available']:
-            available_count += 1
 
-    # Current user's availability
+    # Build active sessions list
+    active_sessions_map = {}
+    for row in active_session_rows:
+        sid = row['id']
+        if sid not in active_sessions_map:
+            active_sessions_map[sid] = {
+                'id': sid,
+                'zoom_link': row['zoom_link'],
+                'started_at': row['started_at'],
+                'members': [],
+            }
+        # Find member name
+        for m in member_list:
+            if m['id'] == row['user_id']:
+                active_sessions_map[sid]['members'].append({
+                    'id': m['id'],
+                    'name': m['name'],
+                    'is_me': m['is_me'],
+                })
+                break
+
+    active_sessions_list = list(active_sessions_map.values())
+
+    # Check if current user is in an active session
+    my_active_session = None
+    for s in active_sessions_list:
+        for mem in s['members']:
+            if mem['is_me']:
+                my_active_session = s
+                break
+        if my_active_session:
+            break
+
+    # Get pending invites for current user (as recipient)
+    pending_invites = db.execute('''
+        SELECT ri.id, ri.from_user_id, ri.zoom_link, ri.created_at, u.name as from_name
+        FROM roleplay_invites ri
+        JOIN users u ON u.id = ri.from_user_id
+        WHERE ri.to_user_id = ? AND ri.circle_id = ? AND ri.status = 'pending'
+        ORDER BY ri.created_at DESC
+    ''', (user['id'], circle['id'])).fetchall()
+
+    pending_invites_list = [{
+        'id': inv['id'],
+        'from_user_id': inv['from_user_id'],
+        'from_name': inv['from_name'],
+        'zoom_link': inv['zoom_link'],
+        'created_at': inv['created_at'],
+    } for inv in pending_invites]
+
+    # Get pending invites sent by current user (to show "waiting" state)
+    sent_pending = db.execute('''
+        SELECT ri.id, ri.to_user_id, ri.created_at, u.name as to_name
+        FROM roleplay_invites ri
+        JOIN users u ON u.id = ri.to_user_id
+        WHERE ri.from_user_id = ? AND ri.circle_id = ? AND ri.status = 'pending'
+        ORDER BY ri.created_at DESC
+    ''', (user['id'], circle['id'])).fetchall()
+
+    sent_pending_list = [{
+        'id': inv['id'],
+        'to_user_id': inv['to_user_id'],
+        'to_name': inv['to_name'],
+        'created_at': inv['created_at'],
+    } for inv in sent_pending]
+
+    # Re-fetch my availability (may have been auto-timed-out)
     my_avail = db.execute(
         'SELECT available FROM availability WHERE user_id = ? AND circle_id = ?',
         (user['id'], circle['id'])
@@ -697,6 +858,11 @@ def circle_status(code):
         'available_count': available_count,
         'my_available': bool(my_avail['available']) if my_avail else False,
         'group_session_ready': available_count >= 2,
+        'active_sessions': active_sessions_list,
+        'my_active_session': my_active_session,
+        'pending_invites': pending_invites_list,
+        'sent_pending_invites': sent_pending_list,
+        'auto_timed_out': auto_timed_out,
     })
 
 
@@ -797,6 +963,295 @@ def log_session(code):
         WHERE circle_id = ? AND user_id IN (?, ?)
     ''', (circle['id'], user['id'], partner_id))
 
+    db.commit()
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/circle/<code>/send-invite', methods=['POST'])
+@login_required
+def send_invite(code):
+    """Send a roleplay invite to another user."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    data = request.json or {}
+    to_user_id = data.get('to_user_id')
+
+    if not to_user_id:
+        return jsonify({'error': 'Target user is required'}), 400
+
+    if to_user_id == user['id']:
+        return jsonify({'error': "Can't invite yourself"}), 400
+
+    # Verify target is in circle and available
+    target_avail = db.execute(
+        'SELECT available FROM availability WHERE user_id = ? AND circle_id = ?',
+        (to_user_id, circle['id'])
+    ).fetchone()
+    if not target_avail or not target_avail['available']:
+        return jsonify({'error': 'User is not available'}), 400
+
+    # Check target is not in active session
+    in_session = db.execute('''
+        SELECT COUNT(*) as cnt FROM active_session_members m
+        JOIN active_sessions s ON s.id = m.session_id
+        WHERE m.user_id = ? AND s.circle_id = ? AND s.ended_at IS NULL
+    ''', (to_user_id, circle['id'])).fetchone()['cnt']
+    if in_session:
+        return jsonify({'error': 'User is already in a session'}), 400
+
+    # Expire any existing pending invites from this user in this circle
+    db.execute('''
+        UPDATE roleplay_invites SET status = 'expired'
+        WHERE from_user_id = ? AND circle_id = ? AND status = 'pending'
+    ''', (user['id'], circle['id']))
+
+    # Use inviter's zoom link
+    zoom_link = user['zoom_link'] or ''
+
+    cursor = db.execute('''
+        INSERT INTO roleplay_invites (circle_id, from_user_id, to_user_id, status, zoom_link)
+        VALUES (?, ?, ?, 'pending', ?)
+    ''', (circle['id'], user['id'], to_user_id, zoom_link))
+    db.commit()
+
+    # Touch the inviter's availability updated_at to prevent auto-timeout
+    db.execute('''
+        UPDATE availability SET updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND circle_id = ?
+    ''', (user['id'], circle['id']))
+    db.commit()
+
+    return jsonify({'success': True, 'invite_id': cursor.lastrowid})
+
+
+@app.route('/api/circle/<code>/respond-invite', methods=['POST'])
+@login_required
+def respond_invite(code):
+    """Accept or decline a roleplay invite."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    data = request.json or {}
+    invite_id = data.get('invite_id')
+    response = data.get('response')  # 'accept' or 'decline'
+    decline_reason = data.get('decline_reason', '')
+
+    if not invite_id or response not in ('accept', 'decline'):
+        return jsonify({'error': 'Invalid request'}), 400
+
+    invite = db.execute('''
+        SELECT * FROM roleplay_invites WHERE id = ? AND to_user_id = ? AND circle_id = ? AND status = 'pending'
+    ''', (invite_id, user['id'], circle['id'])).fetchone()
+
+    if not invite:
+        return jsonify({'error': 'Invite not found or already responded'}), 404
+
+    if response == 'decline':
+        db.execute('''
+            UPDATE roleplay_invites SET status = 'declined', decline_reason = ?, responded_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (decline_reason, invite_id))
+        db.commit()
+        return jsonify({'success': True, 'status': 'declined'})
+
+    # Accept — create active session
+    db.execute('''
+        UPDATE roleplay_invites SET status = 'accepted', responded_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (invite_id,))
+
+    zoom_link = invite['zoom_link']
+
+    # Create active session
+    cursor = db.execute('''
+        INSERT INTO active_sessions (circle_id, zoom_link) VALUES (?, ?)
+    ''', (circle['id'], zoom_link))
+    session_id = cursor.lastrowid
+
+    # Add both users
+    db.execute('''
+        INSERT INTO active_session_members (session_id, user_id) VALUES (?, ?)
+    ''', (session_id, invite['from_user_id']))
+    db.execute('''
+        INSERT INTO active_session_members (session_id, user_id) VALUES (?, ?)
+    ''', (session_id, user['id']))
+
+    # Set both users' availability to "available=1" but they'll show as in_session due to active_session_members
+    # Actually keep them available=1 so when session ends they can quickly go back
+    # Touch updated_at for both to prevent auto-timeout
+    db.execute('''
+        UPDATE availability SET updated_at = CURRENT_TIMESTAMP
+        WHERE circle_id = ? AND user_id IN (?, ?)
+    ''', (circle['id'], user['id'], invite['from_user_id']))
+
+    db.commit()
+
+    return jsonify({
+        'success': True,
+        'status': 'accepted',
+        'session_id': session_id,
+        'zoom_link': zoom_link,
+    })
+
+
+@app.route('/api/circle/<code>/join-session', methods=['POST'])
+@login_required
+def join_session(code):
+    """Join an existing active session."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    data = request.json or {}
+    session_id = data.get('session_id')
+
+    if not session_id:
+        return jsonify({'error': 'Session ID is required'}), 400
+
+    active_sess = db.execute('''
+        SELECT * FROM active_sessions WHERE id = ? AND circle_id = ? AND ended_at IS NULL
+    ''', (session_id, circle['id'])).fetchone()
+
+    if not active_sess:
+        return jsonify({'error': 'Session not found or already ended'}), 404
+
+    # Check if already in session
+    existing = db.execute('''
+        SELECT * FROM active_session_members WHERE session_id = ? AND user_id = ?
+    ''', (session_id, user['id'])).fetchone()
+
+    if not existing:
+        db.execute('''
+            INSERT INTO active_session_members (session_id, user_id) VALUES (?, ?)
+        ''', (session_id, user['id']))
+
+    # Touch availability to prevent auto-timeout
+    db.execute('''
+        UPDATE availability SET updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND circle_id = ?
+    ''', (user['id'], circle['id']))
+
+    db.commit()
+
+    return jsonify({
+        'success': True,
+        'zoom_link': active_sess['zoom_link'],
+    })
+
+
+@app.route('/api/circle/<code>/end-session', methods=['POST'])
+@login_required
+def end_session(code):
+    """End an active session. Auto-logs it."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    data = request.json or {}
+    session_id = data.get('session_id')
+    go_available = data.get('go_available', False)
+    notes = data.get('notes', '')
+    rating = data.get('rating', 0)
+
+    if not session_id:
+        return jsonify({'error': 'Session ID is required'}), 400
+
+    active_sess = db.execute('''
+        SELECT * FROM active_sessions WHERE id = ? AND circle_id = ? AND ended_at IS NULL
+    ''', (session_id, circle['id'])).fetchone()
+
+    if not active_sess:
+        return jsonify({'error': 'Session not found or already ended'}), 404
+
+    # Verify user is in session
+    membership = db.execute('''
+        SELECT * FROM active_session_members WHERE session_id = ? AND user_id = ?
+    ''', (session_id, user['id'])).fetchone()
+    if not membership:
+        return jsonify({'error': 'You are not in this session'}), 400
+
+    # End the session
+    db.execute('''
+        UPDATE active_sessions SET ended_at = CURRENT_TIMESTAMP WHERE id = ?
+    ''', (session_id,))
+
+    # Calculate duration
+    started_at = datetime.strptime(active_sess['started_at'], '%Y-%m-%d %H:%M:%S')
+    duration_minutes = max(1, int((datetime.utcnow() - started_at).total_seconds() / 60))
+
+    # Get all members in session
+    session_members = db.execute('''
+        SELECT user_id FROM active_session_members WHERE session_id = ?
+    ''', (session_id,)).fetchall()
+
+    member_ids = [m['user_id'] for m in session_members]
+
+    # Log session for each pair of participants
+    for i in range(len(member_ids)):
+        for j in range(i + 1, len(member_ids)):
+            db.execute('''
+                INSERT INTO sessions (circle_id, user1_id, user2_id, duration_minutes, rating, notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (circle['id'], member_ids[i], member_ids[j], duration_minutes, rating, notes))
+
+    # Handle availability for all session members
+    if go_available:
+        # Only set the requesting user available
+        db.execute('''
+            UPDATE availability SET available = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND circle_id = ?
+        ''', (user['id'], circle['id']))
+    else:
+        db.execute('''
+            UPDATE availability SET available = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND circle_id = ?
+        ''', (user['id'], circle['id']))
+
+    db.commit()
+
+    return jsonify({
+        'success': True,
+        'duration_minutes': duration_minutes,
+    })
+
+
+@app.route('/api/circle/<code>/cancel-invite', methods=['POST'])
+@login_required
+def cancel_invite(code):
+    """Cancel a pending invite that you sent."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    data = request.json or {}
+    invite_id = data.get('invite_id')
+
+    if not invite_id:
+        return jsonify({'error': 'Invite ID is required'}), 400
+
+    db.execute('''
+        UPDATE roleplay_invites SET status = 'expired'
+        WHERE id = ? AND from_user_id = ? AND circle_id = ? AND status = 'pending'
+    ''', (invite_id, user['id'], circle['id']))
     db.commit()
 
     return jsonify({'success': True})

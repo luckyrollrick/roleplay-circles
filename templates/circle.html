@@ -17,6 +17,15 @@
 {% block body %}
 <div style="max-width:360px; margin:0 auto; padding:12px;">
 
+    <!-- Pending Invite Banner (received) -->
+    <div id="inviteBanner" style="display:none; margin-bottom:12px;"></div>
+
+    <!-- Sent Invite Waiting Banner -->
+    <div id="sentInviteBanner" style="display:none; margin-bottom:12px;"></div>
+
+    <!-- Active Session Banner (when you're in one) -->
+    <div id="mySessionBanner" style="display:none; margin-bottom:12px;"></div>
+
     <!-- Availability Toggle -->
     <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--bg-card); border:2px solid var(--border); border-radius:var(--radius-sm); margin-bottom:12px;" id="availCard">
         <div>
@@ -24,6 +33,14 @@
             <div class="text-xs text-muted" id="availSub"></div>
         </div>
         <button class="toggle-btn" id="availToggle" onclick="toggleAvailability()"></button>
+    </div>
+
+    <!-- Active Sessions in Circle -->
+    <div id="activeSessionsSection" style="display:none; margin-bottom:12px;">
+        <div class="text-xs text-muted" style="margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">
+            🔴 Live Sessions
+        </div>
+        <div id="activeSessionsList"></div>
     </div>
 
     <!-- Current / Next Call (compact) -->
@@ -64,6 +81,41 @@
         <summary class="text-xs text-muted" style="cursor:pointer; padding:6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">📋 Recent Sessions</summary>
         <div id="recentSessions" style="padding-top:8px;"></div>
     </details>
+</div>
+
+<!-- Invite Confirmation Modal -->
+<div class="modal-overlay" id="inviteModal">
+    <div class="modal" style="max-width:340px; padding:20px;">
+        <div class="modal-title" style="font-size:0.9rem;">🎯 Invite to Roleplay?</div>
+        <div id="inviteModalBody" style="font-size:0.85rem; margin-bottom:16px;"></div>
+        <div class="flex gap-1">
+            <button onclick="confirmSendInvite()" class="btn btn-green btn-sm" id="sendInviteBtn">Send Invite</button>
+            <button onclick="closeModal('inviteModal')" class="btn btn-secondary btn-sm">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- End Session Modal -->
+<div class="modal-overlay" id="endSessionModal">
+    <div class="modal" style="max-width:340px; padding:20px;">
+        <div class="modal-title" style="font-size:0.9rem;">🏁 End Session</div>
+        <div id="endSessionBody" style="font-size:0.85rem; margin-bottom:12px;"></div>
+        <div class="form-group">
+            <label class="form-label">Rating</label>
+            <div class="flex gap-1" id="endRatingStars">
+                <button onclick="setEndRating(1)" class="btn btn-ghost btn-sm end-rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setEndRating(2)" class="btn btn-ghost btn-sm end-rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setEndRating(3)" class="btn btn-ghost btn-sm end-rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setEndRating(4)" class="btn btn-ghost btn-sm end-rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setEndRating(5)" class="btn btn-ghost btn-sm end-rating-star" style="padding:2px 6px;">⭐</button>
+            </div>
+        </div>
+        <div class="flex gap-1" style="flex-wrap:wrap;">
+            <button onclick="endSessionAction(true)" class="btn btn-green btn-sm">End & Go Available</button>
+            <button onclick="endSessionAction(false)" class="btn btn-secondary btn-sm">End Session</button>
+            <button onclick="closeModal('endSessionModal')" class="btn btn-ghost btn-sm" style="width:100%; margin-top:4px;">Cancel</button>
+        </div>
+    </div>
 </div>
 
 <!-- Log Session Modal -->
@@ -112,6 +164,42 @@ const MY_ID = {{ user.id }};
 let isAvailable = false;
 let members = [];
 let sessionRating = 0;
+let endSessionRating = 0;
+let pendingInviteTarget = null;
+let currentSessionId = null;
+let sessionTimerInterval = null;
+let previousPendingInviteIds = new Set();
+let notificationsEnabled = false;
+
+// ============ NOTIFICATIONS ============
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().then(perm => {
+            notificationsEnabled = perm === 'granted';
+        });
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+        notificationsEnabled = true;
+    }
+}
+
+function showBrowserNotification(title, body) {
+    if (!notificationsEnabled) return;
+    try {
+        const n = new Notification(title, {
+            body: body,
+            icon: '🎯',
+            tag: 'roleplay-invite',
+            requireInteraction: true,
+        });
+        // Try to play a sound
+        try {
+            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2JkZeWj4F1bGVnc4GOlpqXjn5xa2Rle4mXoJuShn1xaGNofJCcoZmMgHRpZWp+kZ6gnpKFd21naHuMm6CdlIh7cGtqd4eSm5yYj4N3cG1wfIyYm5mTh3xybm94iJWamZWLf3VwcHWDj5iZl5GGfHNxcnaBjJWYlpKIf3ZzcnR/i5OWlZOKgXl1c3V+iZGUlJKLg3t3dXZ8ho6SkZGLhH15d3d7hIuQkJCLhYB8eXl7goiNj4+MhoJ+e3p7gYaMjo6MhoOAfXt7gIWKjI2MiIWCf317gIKHiouLioiFg4B+foCEh4mKioqIhYOBf36AgoaIiYmJiIaEgoF/gIKEhoeIiImIhoWEgoGAgoOFhoiIiIiHhoWDgoGBgoSFhoeHh4eHhoWEg4KCg4OFhYaGhoeHhoaFhIODgoODhIWFhoeHh4eGhoWEhIODg4OEhYaGh4eHh4eGhoWFhIODhIOEhYWGhoeHh4eHhoaFhYSDhIOEhIWFhoaHh4eHh4eGhoaFhYSEhIOEhIWFhoaHh4eHh4eHhoaGhYWEhISDhISFhYaGh4eHh4eH');
+            audio.volume = 0.3;
+            audio.play().catch(() => {});
+        } catch(e) {}
+        setTimeout(() => n.close(), 10000);
+    } catch(e) {}
+}
 
 // ============ STATUS ============
 async function loadStatus() {
@@ -120,59 +208,373 @@ async function loadStatus() {
         members = data.members;
         isAvailable = data.my_available;
 
+        // Auto-timeout notification
+        if (data.auto_timed_out) {
+            showToast("You've been set to unavailable due to inactivity", 'error');
+        }
+
         const toggle = document.getElementById('availToggle');
         const label = document.getElementById('availLabel');
         const sub = document.getElementById('availSub');
 
-        toggle.classList.toggle('active', isAvailable);
-        label.textContent = isAvailable ? "You're Available 🟢" : "You're Unavailable";
-        sub.textContent = `${data.available_count} of ${data.members.length} free`;
+        // Determine current user state
+        const myMember = data.members.find(m => m.is_me);
+        const myState = myMember ? myMember.state : 'unavailable';
 
-        if (data.group_session_ready && isAvailable) {
-            sub.textContent += ' — Go! 🎯';
+        if (myState === 'in_session') {
+            toggle.classList.add('active');
+            label.textContent = "In Session 🔴";
+            sub.textContent = `${data.available_count} of ${data.members.length} free`;
+        } else {
+            toggle.classList.toggle('active', isAvailable);
+            label.textContent = isAvailable ? "You're Available 🟢" : "You're Unavailable";
+            sub.textContent = `${data.available_count} of ${data.members.length} free`;
+            if (data.group_session_ready && isAvailable) {
+                sub.textContent += ' — Go! 🎯';
+            }
         }
 
         document.getElementById('availCount').textContent = `(${data.available_count}/${data.members.length})`;
 
-        renderMembers(data.members);
+        // Render members
+        renderMembers(data.members, data.sent_pending_invites);
+
+        // Render active sessions
+        renderActiveSessions(data.active_sessions, data.my_active_session);
+
+        // Render pending invites (received)
+        renderPendingInvites(data.pending_invites);
+
+        // Render sent pending invites
+        renderSentPendingInvites(data.sent_pending_invites);
+
+        // Track my active session for timer
+        if (data.my_active_session) {
+            if (currentSessionId !== data.my_active_session.id) {
+                currentSessionId = data.my_active_session.id;
+                startSessionTimer(data.my_active_session.started_at);
+            }
+        } else {
+            if (currentSessionId) {
+                currentSessionId = null;
+                stopSessionTimer();
+            }
+        }
+
     } catch (err) {
         console.error('Failed to load status:', err);
     }
 }
 
-function renderMembers(members) {
+function renderMembers(members, sentPending) {
     const list = document.getElementById('memberList');
     if (!members.length) {
         list.innerHTML = '<div class="text-sm text-muted" style="padding:12px;">No members yet</div>';
         return;
     }
 
-    // Sort: available first, then alphabetical
+    const sentPendingUserIds = new Set((sentPending || []).map(i => i.to_user_id));
+
+    // Sort: in_session first, then available, then unavailable
+    const stateOrder = { in_session: 0, available: 1, unavailable: 2 };
     const sorted = [...members].sort((a, b) => {
-        if (a.available !== b.available) return b.available - a.available;
+        const sa = stateOrder[a.state] ?? 2;
+        const sb = stateOrder[b.state] ?? 2;
+        if (sa !== sb) return sa - sb;
         return a.name.localeCompare(b.name);
     });
 
     list.innerHTML = sorted.map(m => {
-        const dotClass = m.available ? 'online' : 'offline';
-        const border = m.available ? 'border-color:var(--green);' : '';
-        const bg = m.available ? 'background:var(--green-dim);' : '';
+        let dotClass, border, bg, stateLabel;
+
+        if (m.state === 'in_session') {
+            dotClass = 'online';
+            border = 'border-color:var(--orange);';
+            bg = 'background:var(--orange-dim);';
+            stateLabel = '<span style="font-size:0.65rem; color:var(--orange); font-weight:600;">IN SESSION</span>';
+        } else if (m.state === 'available') {
+            dotClass = 'online';
+            border = 'border-color:var(--green);';
+            bg = 'background:var(--green-dim);';
+            stateLabel = '';
+        } else {
+            dotClass = 'offline';
+            border = '';
+            bg = '';
+            stateLabel = '';
+        }
 
         let action = '';
-        if (m.available && !m.is_me && m.zoom_link) {
-            action = `<a href="${m.zoom_link}" target="_blank" class="btn btn-green btn-sm" style="padding:3px 10px; font-size:0.75rem;">Join</a>`;
+        if (m.state === 'available' && !m.is_me) {
+            if (sentPendingUserIds.has(m.id)) {
+                action = `<span style="font-size:0.7rem; color:var(--orange); font-weight:600; animation: pulse 1.5s infinite;">Waiting...</span>`;
+            } else {
+                action = `<button onclick="openInviteModal(${m.id}, '${m.name.replace(/'/g, "\\'")}')" class="btn btn-green btn-sm" style="padding:3px 10px; font-size:0.75rem;">🎯 Invite</button>`;
+            }
         }
 
         return `
             <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg-card); border:2px solid var(--border); border-radius:var(--radius-sm); margin-bottom:4px; ${border}${bg}">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span class="status-dot ${dotClass}"></span>
-                    <span style="font-size:0.85rem; font-weight:600;">${m.name}${m.is_me ? ' (you)' : ''}</span>
+                    <div>
+                        <span style="font-size:0.85rem; font-weight:600;">${m.name}${m.is_me ? ' (you)' : ''}</span>
+                        ${stateLabel ? '<br>' + stateLabel : ''}
+                    </div>
                 </div>
                 ${action}
             </div>
         `;
     }).join('');
+}
+
+// ============ ACTIVE SESSIONS ============
+function renderActiveSessions(sessions, mySession) {
+    const section = document.getElementById('activeSessionsSection');
+    const list = document.getElementById('activeSessionsList');
+    const banner = document.getElementById('mySessionBanner');
+
+    // Show my session banner if I'm in one
+    if (mySession) {
+        const memberNames = mySession.members.map(m => m.name).join(' & ');
+        banner.style.display = 'block';
+        banner.innerHTML = `
+            <div style="padding:14px 16px; background:var(--orange-dim); border:2px solid var(--orange); border-radius:var(--radius-sm);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <div style="font-weight:700; font-size:0.9rem; color:var(--orange);">🔴 In Session</div>
+                    <div id="sessionTimer" style="font-family:var(--font-pixel); font-size:0.7rem; color:var(--orange);"></div>
+                </div>
+                <div style="font-size:0.85rem; margin-bottom:8px;">${memberNames}</div>
+                ${mySession.zoom_link ? `<a href="${mySession.zoom_link}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 12px; font-size:0.75rem; margin-bottom:8px; display:inline-block;">📹 Join Zoom</a>` : ''}
+                <div>
+                    <button onclick="openEndSession(${mySession.id})" class="btn btn-secondary btn-sm" style="font-size:0.75rem;">🏁 End Session</button>
+                </div>
+            </div>
+        `;
+    } else {
+        banner.style.display = 'none';
+    }
+
+    // Show other active sessions for the circle (not including mine)
+    const otherSessions = sessions.filter(s => !s.members.some(m => m.is_me));
+
+    if (otherSessions.length > 0) {
+        section.style.display = 'block';
+        list.innerHTML = otherSessions.map(s => {
+            const names = s.members.map(m => m.name).join(' & ');
+            return `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg-card); border:2px solid var(--orange); border-radius:var(--radius-sm); margin-bottom:4px; background:var(--orange-dim);">
+                    <div>
+                        <div style="font-size:0.8rem; font-weight:600;">${names}</div>
+                        <div class="text-xs text-muted">Roleplaying now</div>
+                    </div>
+                    <button onclick="joinSession(${s.id})" class="btn btn-green btn-sm" style="padding:3px 10px; font-size:0.75rem;">Join</button>
+                </div>
+            `;
+        }).join('');
+    } else {
+        section.style.display = 'none';
+    }
+}
+
+// ============ SESSION TIMER ============
+function startSessionTimer(startedAt) {
+    stopSessionTimer();
+    const startTime = new Date(startedAt + 'Z'); // UTC
+    function update() {
+        const now = new Date();
+        const diff = Math.max(0, Math.floor((now - startTime) / 1000));
+        const mins = Math.floor(diff / 60);
+        const secs = diff % 60;
+        const el = document.getElementById('sessionTimer');
+        if (el) {
+            el.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+    }
+    update();
+    sessionTimerInterval = setInterval(update, 1000);
+}
+
+function stopSessionTimer() {
+    if (sessionTimerInterval) {
+        clearInterval(sessionTimerInterval);
+        sessionTimerInterval = null;
+    }
+}
+
+// ============ INVITE FLOW ============
+function openInviteModal(userId, userName) {
+    pendingInviteTarget = userId;
+    document.getElementById('inviteModalBody').textContent = `Send a roleplay invite to ${userName}? They'll have 60 seconds to accept.`;
+    document.getElementById('inviteModal').classList.add('active');
+
+    // Request notification permission on first interaction
+    requestNotificationPermission();
+}
+
+async function confirmSendInvite() {
+    if (!pendingInviteTarget) return;
+    const btn = document.getElementById('sendInviteBtn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/send-invite`, {
+            method: 'POST',
+            body: { to_user_id: pendingInviteTarget }
+        });
+        showToast('Invite sent! ⏳');
+        closeModal('inviteModal');
+        loadStatus();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Send Invite';
+    pendingInviteTarget = null;
+}
+
+function renderPendingInvites(invites) {
+    const banner = document.getElementById('inviteBanner');
+    if (!invites || !invites.length) {
+        banner.style.display = 'none';
+        return;
+    }
+
+    // Check for new invites and trigger notification
+    invites.forEach(inv => {
+        if (!previousPendingInviteIds.has(inv.id)) {
+            showBrowserNotification('🎯 Roleplay Invite!', `${inv.from_name} wants to roleplay with you!`);
+        }
+    });
+    previousPendingInviteIds = new Set(invites.map(i => i.id));
+
+    banner.style.display = 'block';
+    banner.innerHTML = invites.map(inv => `
+        <div style="padding:14px 16px; background:var(--green-dim); border:2px solid var(--green); border-radius:var(--radius-sm); animation: pulse 1.5s infinite;">
+            <div style="font-weight:700; font-size:0.9rem; margin-bottom:6px;">🎯 ${inv.from_name} wants to roleplay!</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button onclick="respondInvite(${inv.id}, 'accept')" class="btn btn-green btn-sm" style="font-size:0.8rem;">✅ Accept</button>
+                <button onclick="respondInvite(${inv.id}, 'decline', 'Busy')" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">Busy</button>
+                <button onclick="respondInvite(${inv.id}, 'decline', 'In a call')" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">In a call</button>
+                <button onclick="respondInvite(${inv.id}, 'decline', 'Maybe later')" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">Later</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderSentPendingInvites(sentInvites) {
+    const banner = document.getElementById('sentInviteBanner');
+    if (!sentInvites || !sentInvites.length) {
+        banner.style.display = 'none';
+        return;
+    }
+
+    banner.style.display = 'block';
+    banner.innerHTML = sentInvites.map(inv => `
+        <div style="padding:10px 14px; background:var(--bg-card); border:2px solid var(--orange); border-radius:var(--radius-sm);">
+            <div style="font-size:0.85rem; font-weight:600; color:var(--orange);">⏳ Waiting for ${inv.to_name}...</div>
+            <div class="text-xs text-muted" style="margin-top:2px;">Invite expires in 60s</div>
+            <button onclick="cancelInvite(${inv.id})" class="btn btn-ghost btn-sm" style="font-size:0.7rem; margin-top:6px; color:var(--text-muted);">Cancel</button>
+        </div>
+    `).join('');
+}
+
+async function respondInvite(inviteId, response, reason) {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/respond-invite`, {
+            method: 'POST',
+            body: { invite_id: inviteId, response: response, decline_reason: reason || '' }
+        });
+        if (response === 'accept') {
+            showToast('Session started! 🎯');
+            if (data.zoom_link) {
+                window.open(data.zoom_link, '_blank');
+            }
+        } else {
+            showToast('Invite declined');
+        }
+        loadStatus();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+async function cancelInvite(inviteId) {
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/cancel-invite`, {
+            method: 'POST',
+            body: { invite_id: inviteId }
+        });
+        showToast('Invite cancelled');
+        loadStatus();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+// ============ JOIN SESSION ============
+async function joinSession(sessionId) {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/join-session`, {
+            method: 'POST',
+            body: { session_id: sessionId }
+        });
+        showToast('Joined session! 🎯');
+        if (data.zoom_link) {
+            window.open(data.zoom_link, '_blank');
+        }
+        loadStatus();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+// ============ END SESSION ============
+function openEndSession(sessionId) {
+    currentEndSessionId = sessionId;
+    endSessionRating = 0;
+    updateEndRatingStars();
+
+    // Calculate current duration
+    const timerEl = document.getElementById('sessionTimer');
+    const duration = timerEl ? timerEl.textContent : '';
+
+    document.getElementById('endSessionBody').textContent = `Session duration: ${duration || 'calculating...'}`;
+    document.getElementById('endSessionModal').classList.add('active');
+}
+
+let currentEndSessionId = null;
+
+function setEndRating(n) {
+    endSessionRating = n;
+    updateEndRatingStars();
+}
+
+function updateEndRatingStars() {
+    document.querySelectorAll('.end-rating-star').forEach((btn, i) => {
+        btn.style.opacity = i < endSessionRating ? '1' : '0.3';
+    });
+}
+
+async function endSessionAction(goAvailable) {
+    if (!currentEndSessionId) return;
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/end-session`, {
+            method: 'POST',
+            body: {
+                session_id: currentEndSessionId,
+                go_available: goAvailable,
+                rating: endSessionRating,
+            }
+        });
+        showToast(`Session ended! ${data.duration_minutes} minutes logged 🎉`);
+        closeModal('endSessionModal');
+        currentEndSessionId = null;
+        stopSessionTimer();
+        loadStatus();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
 }
 
 // ============ NEXT CALL ============
@@ -187,7 +589,6 @@ async function loadNextCall() {
             return;
         }
 
-        // Show the first event (current or next)
         const e = data.events[0];
         section.style.display = 'block';
 
@@ -212,6 +613,13 @@ async function loadNextCall() {
 
 // ============ AVAILABILITY ============
 async function toggleAvailability() {
+    // Don't toggle if in session
+    const myMember = members.find(m => m.is_me);
+    if (myMember && myMember.state === 'in_session') {
+        showToast('End your session first', 'error');
+        return;
+    }
+
     isAvailable = !isAvailable;
     try {
         await api(`/api/circle/${CIRCLE_CODE}/available`, {
@@ -219,7 +627,10 @@ async function toggleAvailability() {
             body: { available: isAvailable }
         });
         loadStatus();
-        if (isAvailable) showToast("You're available! 🎯");
+        if (isAvailable) {
+            showToast("You're available! 🎯");
+            requestNotificationPermission();
+        }
     } catch (err) {
         showToast(err.message, 'error');
         isAvailable = !isAvailable;
@@ -321,7 +732,7 @@ async function loadRecentSessions() {
     }
 }
 
-// ============ INVITE ============
+// ============ INVITE LINK ============
 let inviteUrl = '';
 async function loadInvite() {
     try {
@@ -339,7 +750,7 @@ function copyInvite() {
     }
 }
 
-// ============ LOG SESSION ============
+// ============ LOG SESSION (manual) ============
 function openLogSession() {
     const select = document.getElementById('sessionPartner');
     select.innerHTML = '<option value="">Select...</option>';
@@ -410,7 +821,15 @@ loadStatus();
 loadNextCall();
 loadInvite();
 
-// Poll every 15 seconds
-setInterval(() => { loadStatus(); loadNextCall(); }, 15000);
+// Poll: 5 seconds for invites/status (combined), 15 seconds for calendar
+setInterval(() => { loadStatus(); }, 5000);
+setInterval(() => { loadNextCall(); }, 15000);
 </script>
+
+<style>
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.85; }
+}
+</style>
 {% endblock %}
