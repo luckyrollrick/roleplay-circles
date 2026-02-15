@@ -1395,10 +1395,35 @@ def get_calendar_events(code):
             except Exception:
                 continue
 
-        # Sort all events by start time
-        all_events.sort(key=lambda e: e.get('start', ''))
+        # Filter out past events — only show upcoming + no-show candidates
+        filtered_events = []
+        for evt in all_events:
+            # Always show no-show candidates
+            if evt.get('needs_noshow_prompt'):
+                filtered_events.append(evt)
+                continue
+            # Show events that haven't ended yet
+            end_str = evt.get('end', '')
+            if end_str and 'T' in end_str:
+                try:
+                    from dateutil import parser as dp
+                    event_end = dp.parse(end_str)
+                    if event_end.tzinfo is None:
+                        event_end = tz.localize(event_end)
+                    else:
+                        event_end = event_end.astimezone(tz)
+                    if event_end >= now:
+                        filtered_events.append(evt)
+                except:
+                    filtered_events.append(evt)
+            else:
+                # All-day events or unparseable — include them
+                filtered_events.append(evt)
 
-        return jsonify({'events': all_events})
+        # Sort by start time
+        filtered_events.sort(key=lambda e: e.get('start', ''))
+
+        return jsonify({'events': filtered_events})
 
     except Exception as e:
         return jsonify({'events': [], 'error': str(e)})
