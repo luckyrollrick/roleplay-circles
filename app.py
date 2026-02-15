@@ -394,7 +394,18 @@ def auth_callback():
 
 @app.route('/auth/logout', methods=['POST', 'GET'])
 def logout():
-    """Logout."""
+    """Logout — set user unavailable in all circles first."""
+    user_id = session.get('user_id')
+    if user_id:
+        try:
+            db = get_db()
+            db.execute(
+                'UPDATE availability SET available = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
+                (user_id,)
+            )
+            db.commit()
+        except Exception:
+            pass
     session.clear()
     return redirect(url_for('login'))
 
