@@ -247,6 +247,11 @@ def auth_google():
         flash('Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.', 'error')
         return redirect(url_for('login'))
 
+    # Preserve where they want to go after login
+    next_url = request.args.get('next')
+    if next_url:
+        session['next_url'] = next_url
+
     state = secrets.token_urlsafe(32)
     session['oauth_state'] = state
 
