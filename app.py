@@ -364,8 +364,9 @@ def auth_callback():
     session.pop('oauth_state', None)
 
     # Redirect to where they were going, or dashboard
+    # Only redirect to safe page routes, not API endpoints
     next_url = session.pop('next_url', None)
-    if next_url:
+    if next_url and '/api/' not in next_url and '/auth/' not in next_url:
         return redirect(next_url)
     return redirect(url_for('dashboard'))
 
@@ -428,6 +429,9 @@ def home():
 def dashboard():
     """Main dashboard."""
     user = get_current_user()
+    if not user:
+        session.clear()
+        return redirect(url_for('login'))
     db = get_db()
 
     # Get user's circles
@@ -562,6 +566,10 @@ def circle_view(code):
     user = get_current_user()
     db = get_db()
 
+    if not user:
+        session.clear()
+        return redirect(url_for('login'))
+
     circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
     if not circle:
         return render_template('error.html', message="Circle not found."), 404
@@ -584,6 +592,9 @@ def circle_view(code):
 def settings_page():
     """User settings page."""
     user = get_current_user()
+    if not user:
+        session.clear()
+        return redirect(url_for('login'))
     db = get_db()
 
     memberships = db.execute('''
