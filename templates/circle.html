@@ -1,153 +1,104 @@
 {% extends "base.html" %}
-{% block title %}{{ circle.name }} - Roleplay Circles{% endblock %}
+{% block title %}{{ circle.name }}{% endblock %}
 
 {% block nav %}
-<nav class="nav">
+<nav class="nav" style="padding:8px 12px;">
     <div class="nav-inner">
-        <a href="/dashboard" class="nav-brand">
-            <span>🎯</span> <span class="nav-user-name">{{ circle.name }}</span>
+        <a href="/dashboard" class="nav-brand" style="font-size:0.9rem;">
+            <span>🎯</span> {{ circle.name }}
         </a>
         <div class="nav-links">
-            <a href="/settings" class="btn btn-ghost btn-sm">⚙️</a>
-            <div class="nav-user">
-                {% if user.avatar_url %}
-                <img src="{{ user.avatar_url }}" alt="" class="nav-avatar">
-                {% endif %}
-                <span class="nav-user-name">{{ user.name.split(' ')[0] }}</span>
-            </div>
+            <a href="/settings" class="btn btn-ghost btn-sm" style="padding:4px 8px;">⚙️</a>
         </div>
     </div>
 </nav>
 {% endblock %}
 
 {% block body %}
-<div class="container page">
+<div style="max-width:360px; margin:0 auto; padding:12px;">
 
     <!-- Availability Toggle -->
-    <div class="card" id="availCard">
-        <div class="toggle-container">
-            <button class="toggle-btn" id="availToggle" onclick="toggleAvailability()"></button>
-            <div>
-                <div class="toggle-label" id="availLabel">Loading...</div>
-                <div class="text-sm text-muted" id="availSub"></div>
-            </div>
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--bg-card); border:2px solid var(--border); border-radius:var(--radius-sm); margin-bottom:12px;" id="availCard">
+        <div>
+            <div style="font-weight:700; font-size:0.9rem;" id="availLabel">Loading...</div>
+            <div class="text-xs text-muted" id="availSub"></div>
         </div>
+        <button class="toggle-btn" id="availToggle" onclick="toggleAvailability()"></button>
     </div>
 
-    <!-- Tabs -->
-    <div class="tabs">
-        <button class="tab active" onclick="switchTab('team')">👥 Team</button>
-        <button class="tab" onclick="switchTab('calendar')">📅 Calendar</button>
-        <button class="tab" onclick="switchTab('stats')">📊 Stats</button>
-        <button class="tab" onclick="switchTab('invite')">🔗 Invite</button>
+    <!-- Current / Next Call (compact) -->
+    <div id="nextCallSection" style="display:none; margin-bottom:12px;">
+        <div class="text-xs text-muted" style="margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Current Call</div>
+        <div id="nextCallCard" style="padding:10px 14px; background:var(--bg-card); border:2px solid var(--border); border-radius:var(--radius-sm);"></div>
     </div>
 
-    <!-- Team Tab -->
-    <div class="tab-content active" id="tab-team">
-        <div class="section">
-            <div class="section-title">
-                Team Members <span id="availCount"></span>
-            </div>
-            <div class="member-grid" id="memberGrid">
-                <div class="loading-overlay"><div class="spinner"></div> Loading...</div>
-            </div>
+    <!-- Who's Available -->
+    <div style="margin-bottom:12px;">
+        <div class="text-xs text-muted" style="margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">
+            Team <span id="availCount"></span>
         </div>
+        <div id="memberList"></div>
     </div>
 
-    <!-- Calendar Tab -->
-    <div class="tab-content" id="tab-calendar">
-        <div class="section">
-            <div class="section-title">Today's Calendar</div>
-            <div id="calendarEvents">
-                <div class="loading-overlay"><div class="spinner"></div> Loading calendar...</div>
-            </div>
-        </div>
+    <!-- Compact Actions -->
+    <div style="display:flex; gap:8px;">
+        <button onclick="openLogSession()" class="btn btn-secondary btn-sm" style="flex:1; font-size:0.8rem;">🎯 Log Session</button>
+        <button onclick="copyInvite()" class="btn btn-secondary btn-sm" style="flex:1; font-size:0.8rem;">🔗 Invite</button>
     </div>
 
-    <!-- Stats Tab -->
-    <div class="tab-content" id="tab-stats">
-        <div class="section">
-            <div class="section-title">Your Stats</div>
-            <div class="stats-grid" id="statsGrid">
-                <div class="loading-overlay"><div class="spinner"></div></div>
-            </div>
+    <!-- Expandable sections -->
+    <details style="margin-top:12px;">
+        <summary class="text-xs text-muted" style="cursor:pointer; padding:6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">📊 Stats & Leaderboard</summary>
+        <div style="padding-top:8px;">
+            <div class="stats-grid" id="statsGrid" style="grid-template-columns: repeat(2, 1fr); gap:8px;"></div>
+            <div id="leaderboard" style="margin-top:8px;"></div>
         </div>
+    </details>
 
-        <div class="section">
-            <div class="section-title">Leaderboard</div>
-            <div class="card card-flat" id="leaderboard">
-                <div class="loading-overlay"><div class="spinner"></div></div>
-            </div>
-        </div>
+    <details style="margin-top:8px;">
+        <summary class="text-xs text-muted" style="cursor:pointer; padding:6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">📅 Full Calendar</summary>
+        <div id="calendarEvents" style="padding-top:8px;"></div>
+    </details>
 
-        <div class="section">
-            <div class="section-title">Recent Sessions</div>
-            <div id="recentSessions">
-                <div class="loading-overlay"><div class="spinner"></div></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Invite Tab -->
-    <div class="tab-content" id="tab-invite">
-        <div class="card card-flat">
-            <div class="card-title mb-2">Invite Your Team</div>
-            <p class="text-sm text-muted mb-2">Share this link with teammates to join {{ circle.name }}:</p>
-
-            <div class="invite-box mb-2">
-                <div class="invite-url" id="inviteUrl">Loading...</div>
-                <button onclick="copyInvite()" class="btn btn-primary btn-sm">📋 Copy</button>
-            </div>
-
-            <div class="text-center">
-                <div class="text-xs text-muted">Circle Code</div>
-                <div style="font-size: 1.5rem; font-weight: 800; letter-spacing: 4px; font-family: monospace; color: var(--accent);">
-                    {{ code }}
-                </div>
-            </div>
-        </div>
-    </div>
+    <details style="margin-top:8px;">
+        <summary class="text-xs text-muted" style="cursor:pointer; padding:6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">📋 Recent Sessions</summary>
+        <div id="recentSessions" style="padding-top:8px;"></div>
+    </details>
 </div>
 
 <!-- Log Session Modal -->
 <div class="modal-overlay" id="sessionModal">
-    <div class="modal">
-        <div class="modal-title">🎯 Log Roleplay Session</div>
-
+    <div class="modal" style="max-width:340px; padding:20px;">
+        <div class="modal-title" style="font-size:0.9rem;">🎯 Log Session</div>
         <div class="form-group">
             <label class="form-label">Partner</label>
             <select id="sessionPartner" class="form-input">
-                <option value="">Select partner...</option>
+                <option value="">Select...</option>
             </select>
         </div>
-
         <div class="form-group">
-            <label class="form-label">Duration (minutes)</label>
+            <label class="form-label">Duration</label>
             <select id="sessionDuration" class="form-input">
                 <option value="5">5 min</option>
                 <option value="10">10 min</option>
                 <option value="15" selected>15 min</option>
                 <option value="20">20 min</option>
                 <option value="30">30 min</option>
-                <option value="45">45 min</option>
-                <option value="60">60 min</option>
             </select>
         </div>
-
         <div class="form-group">
-            <label class="form-label">Rating (optional)</label>
+            <label class="form-label">Rating</label>
             <div class="flex gap-1" id="ratingStars">
-                <button onclick="setRating(1)" class="btn btn-ghost btn-sm rating-star">⭐</button>
-                <button onclick="setRating(2)" class="btn btn-ghost btn-sm rating-star">⭐</button>
-                <button onclick="setRating(3)" class="btn btn-ghost btn-sm rating-star">⭐</button>
-                <button onclick="setRating(4)" class="btn btn-ghost btn-sm rating-star">⭐</button>
-                <button onclick="setRating(5)" class="btn btn-ghost btn-sm rating-star">⭐</button>
+                <button onclick="setRating(1)" class="btn btn-ghost btn-sm rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setRating(2)" class="btn btn-ghost btn-sm rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setRating(3)" class="btn btn-ghost btn-sm rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setRating(4)" class="btn btn-ghost btn-sm rating-star" style="padding:2px 6px;">⭐</button>
+                <button onclick="setRating(5)" class="btn btn-ghost btn-sm rating-star" style="padding:2px 6px;">⭐</button>
             </div>
         </div>
-
         <div class="flex gap-1">
-            <button onclick="submitSession()" class="btn btn-green" id="logSessionBtn">Log Session</button>
-            <button onclick="closeModal('sessionModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitSession()" class="btn btn-green btn-sm" id="logSessionBtn">Log</button>
+            <button onclick="closeModal('sessionModal')" class="btn btn-secondary btn-sm">Cancel</button>
         </div>
     </div>
 </div>
@@ -161,47 +112,28 @@ const MY_ID = {{ user.id }};
 let isAvailable = false;
 let members = [];
 let sessionRating = 0;
-let pollInterval;
 
-// ============ TABS ============
-function switchTab(name) {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-
-    event.target.classList.add('active');
-    document.getElementById(`tab-${name}`).classList.add('active');
-
-    if (name === 'calendar') loadCalendar();
-    if (name === 'stats') { loadStats(); loadRecentSessions(); }
-    if (name === 'invite') loadInvite();
-}
-
-// ============ STATUS / TEAM ============
+// ============ STATUS ============
 async function loadStatus() {
     try {
         const data = await api(`/api/circle/${CIRCLE_CODE}/status`);
         members = data.members;
         isAvailable = data.my_available;
 
-        // Update toggle
         const toggle = document.getElementById('availToggle');
         const label = document.getElementById('availLabel');
         const sub = document.getElementById('availSub');
 
         toggle.classList.toggle('active', isAvailable);
-        label.textContent = isAvailable ? "You're Available" : "You're Unavailable";
-        label.classList.toggle('available', isAvailable);
-        sub.textContent = `${data.available_count} of ${data.members.length} available`;
+        label.textContent = isAvailable ? "You're Available 🟢" : "You're Unavailable";
+        sub.textContent = `${data.available_count} of ${data.members.length} free`;
 
         if (data.group_session_ready && isAvailable) {
-            sub.textContent += ' · Ready to roleplay! 🎯';
+            sub.textContent += ' — Go! 🎯';
         }
 
-        // Update count badge
-        document.getElementById('availCount').textContent =
-            `(${data.available_count}/${data.members.length})`;
+        document.getElementById('availCount').textContent = `(${data.available_count}/${data.members.length})`;
 
-        // Render members
         renderMembers(data.members);
     } catch (err) {
         console.error('Failed to load status:', err);
@@ -209,41 +141,73 @@ async function loadStatus() {
 }
 
 function renderMembers(members) {
-    const grid = document.getElementById('memberGrid');
+    const list = document.getElementById('memberList');
     if (!members.length) {
-        grid.innerHTML = '<div class="empty-state"><p>No members yet</p></div>';
+        list.innerHTML = '<div class="text-sm text-muted" style="padding:12px;">No members yet</div>';
         return;
     }
 
-    grid.innerHTML = members.map(m => {
-        const initials = m.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-        const avatarHtml = m.avatar_url
-            ? `<img src="${m.avatar_url}" alt="" class="member-avatar">`
-            : `<div class="member-avatar">${initials}</div>`;
+    // Sort: available first, then alphabetical
+    const sorted = [...members].sort((a, b) => {
+        if (a.available !== b.available) return b.available - a.available;
+        return a.name.localeCompare(b.name);
+    });
 
-        const classes = ['member-card'];
-        if (m.available) classes.push('available');
-        if (m.is_me) classes.push('is-me');
+    list.innerHTML = sorted.map(m => {
+        const dotClass = m.available ? 'online' : 'offline';
+        const border = m.available ? 'border-color:var(--green);' : '';
+        const bg = m.available ? 'background:var(--green-dim);' : '';
 
-        let actions = '';
+        let action = '';
         if (m.available && !m.is_me && m.zoom_link) {
-            actions = `<a href="${m.zoom_link}" target="_blank" class="btn btn-green btn-sm" style="margin-top:6px; font-size:0.8rem;">📞 Join Zoom</a>`;
+            action = `<a href="${m.zoom_link}" target="_blank" class="btn btn-green btn-sm" style="padding:3px 10px; font-size:0.75rem;">Join</a>`;
         }
 
         return `
-            <div class="${classes.join(' ')}">
-                ${avatarHtml}
-                <div class="member-info">
-                    <div class="member-name">${m.name}${m.is_me ? ' (you)' : ''}</div>
-                    <div class="member-status">
-                        <span class="status-dot ${m.available ? 'online' : 'offline'}"></span>
-                        ${m.available ? 'Available' : 'Unavailable'}
-                    </div>
-                    ${actions}
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg-card); border:2px solid var(--border); border-radius:var(--radius-sm); margin-bottom:4px; ${border}${bg}">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="status-dot ${dotClass}"></span>
+                    <span style="font-size:0.85rem; font-weight:600;">${m.name}${m.is_me ? ' (you)' : ''}</span>
                 </div>
+                ${action}
             </div>
         `;
     }).join('');
+}
+
+// ============ NEXT CALL ============
+async function loadNextCall() {
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/calendar`);
+        const section = document.getElementById('nextCallSection');
+        const card = document.getElementById('nextCallCard');
+
+        if (!data.events || !data.events.length) {
+            section.style.display = 'none';
+            return;
+        }
+
+        // Show the first event (current or next)
+        const e = data.events[0];
+        section.style.display = 'block';
+
+        let noshowBtn = '';
+        if (e.needs_noshow_prompt) {
+            noshowBtn = `<button onclick="markNoShow('${e.uid}', '${e.summary.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm" style="padding:3px 10px; font-size:0.75rem; margin-top:6px;">No-show? Go available</button>`;
+        }
+
+        card.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <div style="font-weight:600; font-size:0.85rem;">${e.summary}</div>
+                    <div class="text-xs text-muted">${e.start_time} – ${e.end_time}${e.calendar ? ' · ' + e.calendar : ''}</div>
+                    ${noshowBtn}
+                </div>
+            </div>
+        `;
+    } catch (err) {
+        document.getElementById('nextCallSection').style.display = 'none';
+    }
 }
 
 // ============ AVAILABILITY ============
@@ -255,125 +219,83 @@ async function toggleAvailability() {
             body: { available: isAvailable }
         });
         loadStatus();
-
-        if (isAvailable) {
-            showToast("You're now available! 🎯");
-        }
+        if (isAvailable) showToast("You're available! 🎯");
     } catch (err) {
         showToast(err.message, 'error');
         isAvailable = !isAvailable;
     }
 }
 
-// ============ CALENDAR ============
-async function loadCalendar() {
-    const container = document.getElementById('calendarEvents');
-    container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading...</div>';
-
-    try {
-        const data = await api(`/api/circle/${CIRCLE_CODE}/calendar`);
-
-        if (data.error === 'token_expired') {
-            container.innerHTML = `
-                <div class="dev-notice">
-                    Calendar access expired. <a href="/auth/google">Sign in again</a> to refresh.
-                </div>`;
-            return;
-        }
-
-        if (data.error === 'No access token') {
-            container.innerHTML = `
-                <div class="dev-notice">
-                    Calendar not connected. <a href="/auth/google">Sign in with Google</a> to see your calendar.
-                </div>`;
-            return;
-        }
-
-        if (!data.events || !data.events.length) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-state-icon">📅</div>
-                    <p>No events today</p>
-                    <p class="text-sm text-muted">Great time for some roleplay!</p>
-                </div>`;
-            return;
-        }
-
-        container.innerHTML = data.events.map(e => `
-            <div class="event-item">
-                <div class="event-time">${e.start_time} - ${e.end_time}</div>
-                <div class="event-title">${e.summary}</div>
-                ${e.needs_noshow_prompt ? `
-                    <div class="event-noshow">
-                        <button onclick="markNoShow('${e.uid}', '${e.summary.replace(/'/g, "\\'")}')"
-                                class="btn btn-danger btn-sm">No-show?</button>
-                    </div>
-                ` : ''}
-            </div>
-        `).join('');
-
-    } catch (err) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <p class="text-muted">${err.message}</p>
-            </div>`;
-    }
-}
-
+// ============ NO SHOW ============
 async function markNoShow(uid, summary) {
     try {
         await api(`/api/circle/${CIRCLE_CODE}/noshow`, {
             method: 'POST',
             body: { event_uid: uid, event_summary: summary }
         });
-        showToast("No-show marked. You're now available! 🎯");
+        showToast("No-show! You're available 🎯");
         loadStatus();
-        loadCalendar();
+        loadNextCall();
     } catch (err) {
         showToast(err.message, 'error');
     }
 }
 
-// ============ STATS ============
+// ============ FULL CALENDAR (expandable) ============
+async function loadCalendar() {
+    const container = document.getElementById('calendarEvents');
+    try {
+        const data = await api(`/api/circle/${CIRCLE_CODE}/calendar`);
+        if (!data.events || !data.events.length) {
+            container.innerHTML = '<div class="text-sm text-muted">No more events today</div>';
+            return;
+        }
+        container.innerHTML = data.events.map(e => `
+            <div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.8rem;">
+                <span class="text-muted" style="min-width:55px;">${e.start_time}</span>
+                <span style="flex:1;">${e.summary}</span>
+                ${e.needs_noshow_prompt ? `<button onclick="markNoShow('${e.uid}', '${e.summary.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:0.7rem;">No-show</button>` : ''}
+            </div>
+        `).join('');
+    } catch (err) {
+        container.innerHTML = '<div class="text-sm text-muted">Could not load calendar</div>';
+    }
+}
+
+// ============ STATS (expandable) ============
 async function loadStats() {
     try {
         const data = await api(`/api/circle/${CIRCLE_CODE}/stats`);
-
         document.getElementById('statsGrid').innerHTML = `
-            <div class="stat-card">
-                <div class="stat-value">${data.my_sessions_this_week}</div>
+            <div class="stat-card" style="padding:10px;">
+                <div class="stat-value" style="font-size:1.3rem;">${data.my_sessions_this_week}</div>
                 <div class="stat-label">This Week</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${data.my_total_sessions}</div>
-                <div class="stat-label">Total Sessions</div>
+            <div class="stat-card" style="padding:10px;">
+                <div class="stat-value" style="font-size:1.3rem;">${data.my_total_sessions}</div>
+                <div class="stat-label">Total</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${data.my_streak}🔥</div>
-                <div class="stat-label">Day Streak</div>
+            <div class="stat-card" style="padding:10px;">
+                <div class="stat-value" style="font-size:1.3rem;">${data.my_streak}🔥</div>
+                <div class="stat-label">Streak</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${data.my_noshows}</div>
-                <div class="stat-label">No-Shows Caught</div>
+            <div class="stat-card" style="padding:10px;">
+                <div class="stat-value" style="font-size:1.3rem;">${data.my_noshows}</div>
+                <div class="stat-label">No-Shows</div>
             </div>
         `;
 
-        // Leaderboard
+        const lb = document.getElementById('leaderboard');
         if (data.leaderboard.length) {
-            document.getElementById('leaderboard').innerHTML = data.leaderboard.map((p, i) => `
-                <div class="leaderboard-item">
-                    <div class="leaderboard-rank ${i < 3 ? 'top-' + (i+1) : ''}">
-                        ${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i+1)}
-                    </div>
-                    <div class="leaderboard-name ${p.is_me ? 'is-me' : ''}">${p.name}${p.is_me ? ' (you)' : ''}</div>
-                    <div class="leaderboard-count">${p.sessions}</div>
+            lb.innerHTML = data.leaderboard.map((p, i) => `
+                <div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.8rem;">
+                    <span style="width:20px; text-align:center; font-weight:700;">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#'+(i+1)}</span>
+                    <span style="flex:1; font-weight:${p.is_me ? '700' : '400'}; ${p.is_me ? 'color:var(--accent);' : ''}">${p.name}</span>
+                    <span style="font-weight:700;">${p.sessions}</span>
                 </div>
             `).join('');
         } else {
-            document.getElementById('leaderboard').innerHTML = `
-                <div class="empty-state">
-                    <p class="text-sm text-muted">No sessions logged yet. Be the first!</p>
-                </div>`;
+            lb.innerHTML = '<div class="text-sm text-muted">No sessions yet</div>';
         }
     } catch (err) {
         console.error(err);
@@ -384,48 +306,43 @@ async function loadRecentSessions() {
     try {
         const data = await api(`/api/circle/${CIRCLE_CODE}/recent-sessions`);
         const container = document.getElementById('recentSessions');
-
         if (!data.sessions.length) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <p class="text-sm text-muted">No sessions yet</p>
-                </div>`;
+            container.innerHTML = '<div class="text-sm text-muted">No sessions yet</div>';
             return;
         }
-
-        container.innerHTML = '<div class="card card-flat">' + data.sessions.map(s => `
-            <div class="session-item">
-                <div>
-                    <div class="session-people">${s.user1_name} ↔ ${s.user2_name}</div>
-                    <div class="session-meta">${s.duration_minutes}min${s.rating ? ' · ' + '⭐'.repeat(s.rating) : ''}</div>
-                </div>
-                <div class="session-meta">${timeAgo(s.created_at)}</div>
+        container.innerHTML = data.sessions.map(s => `
+            <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.8rem;">
+                <span>${s.user1_name} ↔ ${s.user2_name} · ${s.duration_minutes}min</span>
+                <span class="text-muted">${timeAgo(s.created_at)}</span>
             </div>
-        `).join('') + '</div>';
+        `).join('');
     } catch (err) {
         console.error(err);
     }
 }
 
 // ============ INVITE ============
+let inviteUrl = '';
 async function loadInvite() {
     try {
         const data = await api(`/api/circle/${CIRCLE_CODE}/invite`);
-        document.getElementById('inviteUrl').textContent = data.invite_url;
-    } catch (err) {
-        console.error(err);
-    }
+        inviteUrl = data.invite_url;
+    } catch (err) {}
 }
 
 function copyInvite() {
-    const url = document.getElementById('inviteUrl').textContent;
-    copyToClipboard(url);
+    if (inviteUrl) {
+        copyToClipboard(inviteUrl);
+    } else {
+        showToast('Loading invite...', 'error');
+        loadInvite();
+    }
 }
 
 // ============ LOG SESSION ============
 function openLogSession() {
     const select = document.getElementById('sessionPartner');
-    select.innerHTML = '<option value="">Select partner...</option>';
+    select.innerHTML = '<option value="">Select...</option>';
     members.filter(m => !m.is_me).forEach(m => {
         select.innerHTML += `<option value="${m.id}">${m.name}</option>`;
     });
@@ -448,29 +365,22 @@ function updateRatingStars() {
 async function submitSession() {
     const partnerId = document.getElementById('sessionPartner').value;
     const duration = parseInt(document.getElementById('sessionDuration').value);
-
     if (!partnerId) return showToast('Select a partner', 'error');
 
     const btn = document.getElementById('logSessionBtn');
     btn.disabled = true;
-
     try {
         await api(`/api/circle/${CIRCLE_CODE}/log-session`, {
             method: 'POST',
-            body: {
-                partner_id: parseInt(partnerId),
-                duration_minutes: duration,
-                rating: sessionRating
-            }
+            body: { partner_id: parseInt(partnerId), duration_minutes: duration, rating: sessionRating }
         });
         showToast('Session logged! 🎉');
         closeModal('sessionModal');
         loadStatus();
-        btn.disabled = false;
     } catch (err) {
         showToast(err.message, 'error');
-        btn.disabled = false;
     }
+    btn.disabled = false;
 }
 
 function closeModal(id) {
@@ -483,19 +393,24 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
     });
 });
 
+// Load expandable sections when opened
+document.querySelectorAll('details').forEach(d => {
+    d.addEventListener('toggle', () => {
+        if (d.open) {
+            const summary = d.querySelector('summary').textContent;
+            if (summary.includes('Stats')) { loadStats(); loadRecentSessions(); }
+            if (summary.includes('Calendar')) loadCalendar();
+            if (summary.includes('Sessions')) loadRecentSessions();
+        }
+    });
+});
+
 // ============ INIT ============
 loadStatus();
+loadNextCall();
 loadInvite();
 
-// Add log session FAB
-const fab = document.createElement('button');
-fab.className = 'btn btn-primary';
-fab.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:50; padding:12px 24px; box-shadow:0 4px 20px rgba(99,102,241,0.4); border-radius:100px;';
-fab.innerHTML = '🎯 Log Session';
-fab.onclick = openLogSession;
-document.body.appendChild(fab);
-
-// Poll for updates every 15 seconds
-pollInterval = setInterval(loadStatus, 15000);
+// Poll every 15 seconds
+setInterval(() => { loadStatus(); loadNextCall(); }, 15000);
 </script>
 {% endblock %}
