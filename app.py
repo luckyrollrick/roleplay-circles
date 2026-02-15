@@ -28,7 +28,23 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 # ============ CONFIG ============
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
+
+# Use /data for persistent storage on Render, fallback to local for dev
+def _get_data_dir():
+    if os.path.exists('/data'):
+        try:
+            test_file = '/data/.write_test'
+            with open(test_file, 'w') as f:
+                f.write('ok')
+            os.remove(test_file)
+            return '/data'
+        except Exception:
+            pass
+    local_dir = os.path.join(BASE_DIR, 'data')
+    os.makedirs(local_dir, exist_ok=True)
+    return local_dir
+
+DATA_DIR = _get_data_dir()
 DB_PATH = os.path.join(DATA_DIR, 'roleplay_circles.db')
 
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
