@@ -752,13 +752,14 @@ def circle_status(code):
             except (ValueError, TypeError):
                 pass
 
-    # Presence detection: auto-set stale users unavailable (last_seen > 30s ago)
+    # Presence detection: auto-set stale users unavailable (last_seen > 60s ago)
+    # Using 60s instead of 30s to handle browser throttling when tab is in background
     db.execute('''
         UPDATE availability SET available = 0, updated_at = CURRENT_TIMESTAMP
         WHERE circle_id = ? AND available = 1 AND user_id IN (
             SELECT cm.user_id FROM circle_members cm
             WHERE cm.circle_id = ? AND cm.last_seen IS NOT NULL
-            AND cm.last_seen <= datetime('now', '-30 seconds')
+            AND cm.last_seen <= datetime('now', '-60 seconds')
         )
     ''', (circle['id'], circle['id']))
 
@@ -768,7 +769,7 @@ def circle_status(code):
         JOIN active_sessions s ON s.id = asm.session_id
         JOIN circle_members cm ON cm.circle_id = s.circle_id AND cm.user_id = asm.user_id
         WHERE s.circle_id = ? AND s.ended_at IS NULL
-        AND cm.last_seen IS NOT NULL AND cm.last_seen <= datetime('now', '-30 seconds')
+        AND cm.last_seen IS NOT NULL AND cm.last_seen <= datetime('now', '-60 seconds')
     ''', (circle['id'],)).fetchall()
 
     for stale in stale_session_members:
