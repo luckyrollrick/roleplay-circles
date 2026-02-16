@@ -237,7 +237,7 @@ function showBrowserNotification(title, body) {
 
 // ============ HEARTBEAT ============
 function sendHeartbeat() {
-    fetch(`/api/circle/${CIRCLE_CODE}/heartbeat`, {
+    return fetch(`/api/circle/${CIRCLE_CODE}/heartbeat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
@@ -246,7 +246,11 @@ function sendHeartbeat() {
 
 // Send heartbeat every 10 seconds
 setInterval(sendHeartbeat, 10000);
-sendHeartbeat(); // Send immediately on load
+
+// Send heartbeat immediately and wait for it before first status load
+// This prevents a race condition where status check runs stale detection
+// before the heartbeat updates last_seen (e.g. on page refresh)
+let heartbeatReady = sendHeartbeat().then(() => true).catch(() => true);
 
 // ============ PRESENCE ============
 // No beforeunload — we rely on heartbeat timeout instead.
@@ -978,7 +982,8 @@ document.querySelectorAll('details').forEach(d => {
 });
 
 // ============ INIT ============
-loadStatus();
+// Wait for first heartbeat before loading status to avoid stale detection race
+heartbeatReady.then(() => loadStatus());
 loadNextCall();
 loadInvite();
 
