@@ -2183,7 +2183,7 @@ def leave_session(code):
 @app.route('/api/circle/<code>/heartbeat', methods=['POST'])
 @login_required
 def heartbeat(code):
-    """Update last_seen timestamp for presence detection."""
+    """Update last_seen timestamp for presence detection — across ALL circles the user belongs to."""
     user = get_current_user()
     db = get_db()
 
@@ -2191,10 +2191,11 @@ def heartbeat(code):
     if not circle:
         return jsonify({'error': 'Circle not found'}), 404
 
+    # Update last_seen in ALL circles the user is a member of, not just the current one
     db.execute('''
         UPDATE circle_members SET last_seen = CURRENT_TIMESTAMP
-        WHERE circle_id = ? AND user_id = ?
-    ''', (circle['id'], user['id']))
+        WHERE user_id = ?
+    ''', (user['id'],))
     db.commit()
 
     return jsonify({'success': True})
