@@ -249,14 +249,34 @@ setInterval(sendHeartbeat, 10000);
 sendHeartbeat(); // Send immediately on load
 
 // ============ BEFOREUNLOAD ============
+// Only set unavailable when actually leaving the site, not internal navigation
+let isInternalNav = false;
+
+// Mark all internal links so we don't trigger unavailable on in-app navigation
+document.addEventListener('click', function(e) {
+    const link = e.target.closest('a');
+    if (link && link.href && link.href.startsWith(window.location.origin)) {
+        isInternalNav = true;
+    }
+});
+
+// Also catch form submissions as internal
+document.addEventListener('submit', function() {
+    isInternalNav = true;
+});
+
 window.addEventListener('beforeunload', function(e) {
+    // Skip if navigating within the app
+    if (isInternalNav) {
+        isInternalNav = false;
+        return;
+    }
     // Use sendBeacon for reliable delivery on tab close
     const url = `/api/circle/${CIRCLE_CODE}/set-unavailable`;
     const data = JSON.stringify({});
     if (navigator.sendBeacon) {
         navigator.sendBeacon(url, new Blob([data], { type: 'application/json' }));
     } else {
-        // Fallback: synchronous XHR
         const xhr = new XMLHttpRequest();
         xhr.open('POST', url, false);
         xhr.setRequestHeader('Content-Type', 'application/json');
