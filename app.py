@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Roleplay Circles v2
-Google OAuth + SQLite + Session Tracking
+Email/Password Auth + SQLite + Session Tracking
 """
 
 import os
@@ -15,6 +15,7 @@ from flask import (
     Flask, render_template, jsonify, request, redirect,
     url_for, session, g, flash
 )
+from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 import pytz
 import requests as http_requests
@@ -46,25 +47,6 @@ def _get_data_dir():
 
 DATA_DIR = _get_data_dir()
 DB_PATH = os.path.join(DATA_DIR, 'roleplay_circles.db')
-
-GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
-GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
-GOOGLE_DISCOVERY_URL = 'https://accounts.google.com/.well-known/openid-configuration'
-
-OAUTH_CONFIGURED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and
-                        GOOGLE_CLIENT_ID != 'your-client-id-here.apps.googleusercontent.com')
-
-GOOGLE_AUTH_URI = 'https://accounts.google.com/o/oauth2/v2/auth'
-GOOGLE_TOKEN_URI = 'https://oauth2.googleapis.com/token'
-GOOGLE_USERINFO_URI = 'https://www.googleapis.com/oauth2/v3/userinfo'
-GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3'
-
-SCOPES = [
-    'openid',
-    'https://www.googleapis.com/auth/userinfo.email',
-    'https://www.googleapis.com/auth/userinfo.profile',
-    'https://www.googleapis.com/auth/calendar.readonly',
-]
 
 
 # ============ DATABASE ============
@@ -227,6 +209,8 @@ def init_db():
         "ALTER TABLE circles ADD COLUMN max_session_size INTEGER DEFAULT 4",
         "ALTER TABLE circle_members ADD COLUMN last_seen TIMESTAMP",
         "ALTER TABLE active_sessions ADD COLUMN started_by INTEGER REFERENCES users(id)",
+        "ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''",
     ]
     for stmt in alter_statements:
         try:
@@ -266,173 +250,156 @@ def get_current_user():
     return user
 
 
-def get_oauth_redirect_uri():
-    """Build the OAuth redirect URI."""
-    override = os.environ.get('OAUTH_REDIRECT_URI', '')
-    if override:
-        return override
-    return url_for('auth_callback', _external=True)
+def get_display_name(user):
+    """Get the display name for a user, falling back to name then email."""
+    if user is None:
+        return 'Unknown'
+    # Try display_name first (new column)
+    try:
+        dn = user['display_name']
+        if dn:
+            return dn
+    except (IndexError, KeyError):
+        pass
+    # Fall back to name
+    return user['name'] or user['email'].split('@')[0]
 
 
 # ============ AUTH ROUTES ============
 
-@app.route('/login')
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Login page."""
+    """Login page — email/password."""
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
-    return render_template('login.html', oauth_configured=OAUTH_CONFIGURED)
 
+    if request.method == 'GET':
+        return render_template('login.html')
 
-@app.route('/auth/google')
-def auth_google():
-    """Start Google OAuth flow."""
-    if not OAUTH_CONFIGURED:
-        flash('Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.', 'error')
-        return redirect(url_for('login'))
+    # POST — handle login
+    email = request.form.get('email', '').strip().lower()
+    password = request.form.get('password', '').strip()
 
-    # Preserve where they want to go after login
-    next_url = request.args.get('next')
-    if next_url:
-        session['next_url'] = next_url
+    if not email or not password:
+        flash('Email and password are required.', 'error')
+        return render_template('login.html')
 
-    state = secrets.token_urlsafe(32)
-    session['oauth_state'] = state
-
-    params = {
-        'client_id': GOOGLE_CLIENT_ID,
-        'redirect_uri': get_oauth_redirect_uri(),
-        'response_type': 'code',
-        'scope': ' '.join(SCOPES),
-        'state': state,
-        'access_type': 'offline',
-        'prompt': 'consent',
-    }
-
-    auth_url = GOOGLE_AUTH_URI + '?' + '&'.join(f'{k}={v}' for k, v in params.items())
-    return redirect(auth_url)
-
-
-@app.route('/auth/callback')
-def auth_callback():
-    """Handle Google OAuth callback."""
-    if not OAUTH_CONFIGURED:
-        return redirect(url_for('login'))
-
-    # Verify state — skip check if state is missing from session (multi-worker issue)
-    stored_state = session.get('oauth_state')
-    request_state = request.args.get('state')
-    if stored_state and request_state and stored_state != request_state:
-        flash('Invalid OAuth state. Please try again.', 'error')
-        return redirect(url_for('login'))
-
-    error = request.args.get('error')
-    if error:
-        flash(f'OAuth error: {error}', 'error')
-        return redirect(url_for('login'))
-
-    code = request.args.get('code')
-    if not code:
-        flash('No authorization code received.', 'error')
-        return redirect(url_for('login'))
-
-    # Exchange code for tokens
-    try:
-        token_resp = http_requests.post(GOOGLE_TOKEN_URI, data={
-            'code': code,
-            'client_id': GOOGLE_CLIENT_ID,
-            'client_secret': GOOGLE_CLIENT_SECRET,
-            'redirect_uri': get_oauth_redirect_uri(),
-            'grant_type': 'authorization_code',
-        }, timeout=10)
-        token_resp.raise_for_status()
-        tokens = token_resp.json()
-    except Exception as e:
-        flash(f'Failed to exchange token: {e}', 'error')
-        return redirect(url_for('login'))
-
-    access_token = tokens.get('access_token')
-    refresh_token = tokens.get('refresh_token', '')
-
-    # Get user info
-    try:
-        userinfo_resp = http_requests.get(GOOGLE_USERINFO_URI, headers={
-            'Authorization': f'Bearer {access_token}'
-        }, timeout=10)
-        userinfo_resp.raise_for_status()
-        userinfo = userinfo_resp.json()
-    except Exception as e:
-        flash(f'Failed to get user info: {e}', 'error')
-        return redirect(url_for('login'))
-
-    google_id = userinfo.get('sub', '')
-    email = userinfo.get('email', '')
-    name = userinfo.get('name', email.split('@')[0])
-    avatar_url = userinfo.get('picture', '')
-
-    # Upsert user — check by google_id first, then by email (for dev login migration)
     db = get_db()
-    existing = db.execute('SELECT id FROM users WHERE google_id = ?', (google_id,)).fetchone()
+    user = db.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
 
-    if not existing:
-        # Check if a dev login user exists with same email
-        existing = db.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone()
+    if not user:
+        flash('Invalid email or password.', 'error')
+        return render_template('login.html')
 
-    if existing:
-        user_id = existing['id']
-        db.execute('''
-            UPDATE users SET google_id=?, email=?, name=?, avatar_url=?,
-            google_refresh_token=COALESCE(NULLIF(?, ''), google_refresh_token)
-            WHERE id=?
-        ''', (google_id, email, name, avatar_url, refresh_token, user_id))
-    else:
-        cursor = db.execute('''
-            INSERT INTO users (google_id, email, name, avatar_url, google_refresh_token)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (google_id, email, name, avatar_url, refresh_token))
-        user_id = cursor.lastrowid
+    # Check if this is a legacy Google OAuth user who hasn't set a password yet
+    password_hash = user['password_hash'] if 'password_hash' in user.keys() else ''
+    if not password_hash:
+        # Show the "set your password" form
+        return render_template('set_password.html', email=email)
 
-    db.commit()
+    # Verify password
+    if not check_password_hash(password_hash, password):
+        flash('Invalid email or password.', 'error')
+        return render_template('login.html')
 
-    # Store as linked Google account (safe — table may not exist in old DBs)
-    try:
-        db.execute('''
-            INSERT INTO linked_google_accounts (user_id, google_id, email, name, access_token, refresh_token, is_primary)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-            ON CONFLICT(user_id, google_id)
-            DO UPDATE SET email=?, name=?, access_token=?,
-            refresh_token=COALESCE(NULLIF(?, ''), refresh_token)
-        ''', (user_id, google_id, email, name, access_token, refresh_token,
-              email, name, access_token, refresh_token))
-        db.commit()
-    except Exception as e:
-        print(f"Warning: Could not store linked account: {e}")
+    # Login successful
+    session['user_id'] = user['id']
 
-    # Check if this was a "link additional account" flow
-    if session.get('linking_account'):
-        session.pop('linking_account', None)
-        session.pop('oauth_state', None)
-        try:
-            db.execute('''
-                UPDATE linked_google_accounts SET is_primary = 0
-                WHERE user_id = ? AND google_id = ?
-            ''', (user_id, google_id))
-            db.commit()
-        except Exception:
-            pass
-        flash(f'Successfully linked {email}!', 'success')
-        return redirect(url_for('settings_page'))
-
-    # Set session
-    session['user_id'] = user_id
-    session['access_token'] = access_token
-    session.pop('oauth_state', None)
-
-    # Redirect to where they were going, or dashboard
-    # Only redirect to safe page routes, not API endpoints
     next_url = session.pop('next_url', None)
     if next_url and '/api/' not in next_url and '/auth/' not in next_url:
         return redirect(next_url)
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    """Signup page — email/password/display name."""
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'GET':
+        return render_template('signup.html')
+
+    # POST — handle signup
+    email = request.form.get('email', '').strip().lower()
+    password = request.form.get('password', '').strip()
+    display_name = request.form.get('display_name', '').strip()
+
+    if not email or not password or not display_name:
+        flash('All fields are required.', 'error')
+        return render_template('signup.html')
+
+    if len(password) < 6:
+        flash('Password must be at least 6 characters.', 'error')
+        return render_template('signup.html')
+
+    db = get_db()
+    existing = db.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone()
+    if existing:
+        flash('An account with this email already exists. Try logging in.', 'error')
+        return render_template('signup.html')
+
+    # Create the user
+    hashed = generate_password_hash(password)
+    cursor = db.execute('''
+        INSERT INTO users (email, name, display_name, password_hash, google_id)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (email, display_name, display_name, hashed, ''))
+    user_id = cursor.lastrowid
+    db.commit()
+
+    # Log them in
+    session['user_id'] = user_id
+
+    # Redirect to settings/onboarding
+    flash('Welcome! Set up your profile to get started.', 'success')
+    next_url = session.pop('next_url', None)
+    if next_url and '/api/' not in next_url and '/auth/' not in next_url:
+        return redirect(next_url)
+    return redirect(url_for('settings_page'))
+
+
+@app.route('/set-password', methods=['POST'])
+def set_password():
+    """Set password for existing Google OAuth users migrating to email/password."""
+    email = request.form.get('email', '').strip().lower()
+    password = request.form.get('password', '').strip()
+    confirm_password = request.form.get('confirm_password', '').strip()
+
+    if not email or not password:
+        flash('Email and password are required.', 'error')
+        return render_template('set_password.html', email=email)
+
+    if len(password) < 6:
+        flash('Password must be at least 6 characters.', 'error')
+        return render_template('set_password.html', email=email)
+
+    if password != confirm_password:
+        flash('Passwords do not match.', 'error')
+        return render_template('set_password.html', email=email)
+
+    db = get_db()
+    user = db.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+    if not user:
+        flash('Account not found.', 'error')
+        return redirect(url_for('login'))
+
+    # Set the password hash
+    hashed = generate_password_hash(password)
+    db.execute('UPDATE users SET password_hash = ? WHERE id = ?', (hashed, user['id']))
+
+    # If no display_name, set it from their existing name
+    try:
+        if not user['display_name']:
+            db.execute('UPDATE users SET display_name = ? WHERE id = ?', (user['name'], user['id']))
+    except (IndexError, KeyError):
+        db.execute('UPDATE users SET display_name = ? WHERE id = ?', (user['name'], user['id']))
+
+    db.commit()
+
+    # Log them in
+    session['user_id'] = user['id']
+    flash('Password set! You can now log in with email and password.', 'success')
     return redirect(url_for('dashboard'))
 
 
@@ -452,42 +419,6 @@ def logout():
             pass
     session.clear()
     return redirect(url_for('login'))
-
-
-# ============ DEV LOGIN (when OAuth not configured) ============
-
-@app.route('/auth/dev-login', methods=['POST'])
-def dev_login():
-    """Development login when OAuth is not configured."""
-    if OAUTH_CONFIGURED:
-        return redirect(url_for('login'))
-
-    name = request.form.get('name', '').strip()
-    email = request.form.get('email', '').strip()
-
-    if not name or not email:
-        flash('Name and email are required.', 'error')
-        return redirect(url_for('login'))
-
-    db = get_db()
-    existing = db.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone()
-
-    if existing:
-        user_id = existing['id']
-        db.execute('UPDATE users SET name=? WHERE id=?', (name, user_id))
-    else:
-        cursor = db.execute('''
-            INSERT INTO users (email, name, google_id) VALUES (?, ?, ?)
-        ''', (email, name, f'dev_{email}'))
-        user_id = cursor.lastrowid
-
-    db.commit()
-    session['user_id'] = user_id
-
-    next_url = session.pop('next_url', None)
-    if next_url:
-        return redirect(next_url)
-    return redirect(url_for('dashboard'))
 
 
 # ============ MAIN ROUTES ============
@@ -596,8 +527,7 @@ def join_page(code):
     ).fetchone()['cnt']
 
     return render_template('join.html', circle=circle, code=code,
-                          user=user, member_count=member_count,
-                          oauth_configured=OAUTH_CONFIGURED)
+                          user=user, member_count=member_count)
 
 
 @app.route('/join/<code>/submit', methods=['POST'])
@@ -799,14 +729,14 @@ def circle_status(code):
 
     # Get members
     members = db.execute('''
-        SELECT u.id, u.name, u.avatar_url, u.zoom_link,
+        SELECT u.id, u.name, u.display_name, u.avatar_url, u.zoom_link,
                cm.start_hour, cm.end_hour, cm.role,
                COALESCE(a.available, 0) as available
         FROM circle_members cm
         JOIN users u ON u.id = cm.user_id
         LEFT JOIN availability a ON a.user_id = u.id AND a.circle_id = ?
         WHERE cm.circle_id = ?
-        ORDER BY u.name
+        ORDER BY COALESCE(NULLIF(u.display_name, ''), u.name)
     ''', (circle['id'], circle['id'])).fetchall()
 
     member_list = []
@@ -827,7 +757,7 @@ def circle_status(code):
 
         member_data = {
             'id': m['id'],
-            'name': m['name'],
+            'name': m['display_name'] or m['name'],
             'avatar_url': m['avatar_url'] or '',
             'zoom_link': m['zoom_link'] or '',
             'available': state == 'available',
@@ -881,7 +811,8 @@ def circle_status(code):
 
     # Get pending invites for current user (as recipient)
     pending_invites = db.execute('''
-        SELECT ri.id, ri.from_user_id, ri.zoom_link, ri.created_at, u.name as from_name
+        SELECT ri.id, ri.from_user_id, ri.zoom_link, ri.created_at,
+               COALESCE(NULLIF(u.display_name, ''), u.name) as from_name
         FROM roleplay_invites ri
         JOIN users u ON u.id = ri.from_user_id
         WHERE ri.to_user_id = ? AND ri.circle_id = ? AND ri.status = 'pending'
@@ -898,7 +829,8 @@ def circle_status(code):
 
     # Get pending invites sent by current user (to show "waiting" state)
     sent_pending = db.execute('''
-        SELECT ri.id, ri.to_user_id, ri.created_at, u.name as to_name
+        SELECT ri.id, ri.to_user_id, ri.created_at,
+               COALESCE(NULLIF(u.display_name, ''), u.name) as to_name
         FROM roleplay_invites ri
         JOIN users u ON u.id = ri.to_user_id
         WHERE ri.from_user_id = ? AND ri.circle_id = ? AND ri.status = 'pending'
@@ -1376,7 +1308,7 @@ def circle_stats(code):
 
     # Leaderboard
     leaderboard = db.execute('''
-        SELECT u.id, u.name, u.avatar_url, COUNT(*) as session_count
+        SELECT u.id, COALESCE(NULLIF(u.display_name, ''), u.name) as name, u.avatar_url, COUNT(*) as session_count
         FROM (
             SELECT user1_id as uid, circle_id FROM sessions
             UNION ALL
@@ -1442,76 +1374,22 @@ def circle_stats(code):
 @app.route('/auth/link-google')
 @login_required
 def link_google_account():
-    """Start OAuth flow to link an additional Google account."""
-    if not OAUTH_CONFIGURED:
-        flash('Google OAuth is not configured.', 'error')
-        return redirect(url_for('settings_page'))
-
-    state = secrets.token_urlsafe(32)
-    session['oauth_state'] = state
-    session['linking_account'] = True  # Flag so callback knows this is a link, not login
-
-    params = {
-        'client_id': GOOGLE_CLIENT_ID,
-        'redirect_uri': get_oauth_redirect_uri(),
-        'response_type': 'code',
-        'scope': ' '.join(SCOPES),
-        'state': state,
-        'access_type': 'offline',
-        'prompt': 'consent select_account',  # Force account picker
-    }
-
-    auth_url = GOOGLE_AUTH_URI + '?' + '&'.join(f'{k}={v}' for k, v in params.items())
-    return redirect(auth_url)
+    """Deprecated — Google OAuth removed. Redirect to settings."""
+    flash('Google account linking has been removed. Use ICS calendar URLs instead.', 'error')
+    return redirect(url_for('settings_page'))
 
 
 @app.route('/api/linked-accounts')
 @login_required
 def list_linked_accounts():
-    """List all linked Google accounts."""
-    user = get_current_user()
-    db = get_db()
-
-    accounts = db.execute(
-        'SELECT id, email, name, is_primary, created_at FROM linked_google_accounts WHERE user_id = ? ORDER BY is_primary DESC, created_at',
-        (user['id'],)
-    ).fetchall()
-
-    return jsonify({
-        'accounts': [{'id': a['id'], 'email': a['email'], 'name': a['name'],
-                       'is_primary': bool(a['is_primary'])} for a in accounts]
-    })
+    """Legacy endpoint — returns empty list since Google OAuth was removed."""
+    return jsonify({'accounts': []})
 
 
 @app.route('/api/linked-accounts/<int:account_id>', methods=['DELETE'])
 @login_required
 def remove_linked_account(account_id):
-    """Remove a linked Google account (can't remove primary)."""
-    user = get_current_user()
-    db = get_db()
-
-    account = db.execute(
-        'SELECT * FROM linked_google_accounts WHERE id = ? AND user_id = ?',
-        (account_id, user['id'])
-    ).fetchone()
-
-    if not account:
-        return jsonify({'error': 'Account not found'}), 404
-
-    if account['is_primary']:
-        return jsonify({'error': "Can't remove your primary account"}), 400
-
-    # Remove associated calendars
-    db.execute(
-        'DELETE FROM user_calendars WHERE user_id = ? AND account_id = ?',
-        (user['id'], account_id)
-    )
-    db.execute(
-        'DELETE FROM linked_google_accounts WHERE id = ? AND user_id = ?',
-        (account_id, user['id'])
-    )
-    db.commit()
-
+    """Legacy endpoint — Google OAuth removed."""
     return jsonify({'success': True})
 
 
@@ -1612,88 +1490,18 @@ def delete_external_calendar(cal_id):
     return jsonify({'success': True})
 
 
-# ============ GOOGLE CALENDARS ============
+# ============ CALENDARS (ICS only — Google OAuth removed) ============
 
 @app.route('/api/calendars')
 @login_required
 def list_calendars():
-    """List all Google Calendars from all linked accounts + external ICS calendars."""
+    """List external ICS calendars (Google OAuth calendars removed)."""
     user = get_current_user()
     db = get_db()
 
-    # Get saved selections from DB
-    saved = db.execute(
-        'SELECT calendar_id, selected FROM user_calendars WHERE user_id = ?',
-        (user['id'],)
-    ).fetchall()
-    saved_map = {r['calendar_id']: bool(r['selected']) for r in saved}
-    has_saved = len(saved_map) > 0
-
-    # Get all linked Google accounts
-    accounts = db.execute(
-        'SELECT * FROM linked_google_accounts WHERE user_id = ? ORDER BY is_primary DESC',
-        (user['id'],)
-    ).fetchall()
-
-    # Fall back to session token if no linked accounts yet
-    if not accounts:
-        access_token = session.get('access_token')
-        if access_token:
-            accounts = [{'id': 0, 'email': user['email'], 'access_token': access_token, 'is_primary': 1}]
-
     calendars = []
 
-    for account in accounts:
-        token = account['access_token'] if hasattr(account, '__getitem__') and isinstance(account, sqlite3.Row) else account.get('access_token', '')
-        acct_email = account['email'] if hasattr(account, '__getitem__') and isinstance(account, sqlite3.Row) else account.get('email', '')
-        acct_id = account['id'] if hasattr(account, '__getitem__') and isinstance(account, sqlite3.Row) else account.get('id', 0)
-
-        if not token:
-            continue
-
-        try:
-            resp = http_requests.get(
-                f'{GOOGLE_CALENDAR_API}/users/me/calendarList',
-                headers={'Authorization': f'Bearer {token}'},
-                timeout=10
-            )
-
-            if resp.status_code == 401:
-                # Try refresh if we have a refresh token
-                # For now, skip this account
-                continue
-
-            if resp.status_code != 200:
-                continue
-
-            data = resp.json()
-
-            for item in data.get('items', []):
-                cal_id = item.get('id', '')
-                summary = item.get('summary', cal_id)
-                color = item.get('backgroundColor', '')
-                access_role = item.get('accessRole', '')
-
-                if has_saved:
-                    selected = saved_map.get(cal_id, False)
-                else:
-                    selected = item.get('primary', False) or access_role == 'owner'
-
-                calendars.append({
-                    'id': cal_id,
-                    'summary': summary,
-                    'color': color,
-                    'primary': item.get('primary', False),
-                    'access_role': access_role,
-                    'selected': selected,
-                    'account_email': acct_email,
-                    'account_id': acct_id,
-                    'source': 'google',
-                })
-        except Exception:
-            continue
-
-    # Add external ICS calendars
+    # Only external ICS calendars now
     ext_cals = db.execute(
         'SELECT * FROM external_calendars WHERE user_id = ?',
         (user['id'],)
@@ -1713,8 +1521,7 @@ def list_calendars():
             'ics_id': ec['id'],
         })
 
-    # Sort: primary first, then by account, then by name
-    calendars.sort(key=lambda c: (not c.get('primary', False), c.get('account_email', '').lower(), c.get('summary', '').lower()))
+    calendars.sort(key=lambda c: c.get('summary', '').lower())
 
     return jsonify({'calendars': calendars})
 
@@ -1761,147 +1568,15 @@ def select_calendars():
 @app.route('/api/circle/<code>/calendar')
 @login_required
 def get_calendar_events(code):
-    """Get today's events from all selected Google calendars + external ICS calendars."""
+    """Get today's events from external ICS calendars."""
     user = get_current_user()
     db = get_db()
 
     try:
         tz = pytz.timezone(user['timezone'] or 'America/Chicago')
         now = datetime.now(tz)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = start_of_day + timedelta(days=1)
 
         all_events = []
-
-        # ---- Google Calendar events ----
-        # Get selected Google calendars
-        selected_cals = db.execute(
-            'SELECT calendar_id, summary, account_id FROM user_calendars WHERE user_id = ? AND selected = 1',
-            (user['id'],)
-        ).fetchall()
-
-        # Build a map of account_id -> access_token
-        accounts = db.execute(
-            'SELECT id, access_token, email FROM linked_google_accounts WHERE user_id = ?',
-            (user['id'],)
-        ).fetchall()
-        token_map = {a['id']: a['access_token'] for a in accounts}
-
-        # Fall back to session token
-        session_token = session.get('access_token')
-
-        if selected_cals:
-            for cal in selected_cals:
-                cal_id = cal['calendar_id']
-                cal_name = cal['summary'] or cal_id
-                acct_id = cal['account_id']
-
-                # Get the right token for this calendar's account
-                token = token_map.get(acct_id, session_token) if acct_id else session_token
-                if not token:
-                    continue
-
-                try:
-                    resp = http_requests.get(
-                        f'{GOOGLE_CALENDAR_API}/calendars/{cal_id}/events',
-                        headers={'Authorization': f'Bearer {token}'},
-                        params={
-                            'timeMin': start_of_day.isoformat(),
-                            'timeMax': end_of_day.isoformat(),
-                            'singleEvents': 'true',
-                            'orderBy': 'startTime',
-                            'maxResults': 20,
-                        },
-                        timeout=10
-                    )
-
-                    if resp.status_code not in (200, 401):
-                        continue
-                    if resp.status_code == 401:
-                        continue
-
-                    data = resp.json()
-                    for item in data.get('items', []):
-                        start = item.get('start', {})
-                        end = item.get('end', {})
-                        start_time = start.get('dateTime', start.get('date', ''))
-                        end_time = end.get('dateTime', end.get('date', ''))
-
-                        needs_noshow = False
-                        if start_time and 'T' in start_time:
-                            try:
-                                from dateutil import parser as dp
-                                event_start = dp.parse(start_time)
-                                if event_start.tzinfo is None:
-                                    event_start = tz.localize(event_start)
-                                mins_since = (now - event_start).total_seconds() / 60
-                                needs_noshow = 0 < mins_since < 60 and mins_since >= 10
-                            except:
-                                pass
-
-                        all_events.append({
-                            'uid': item.get('id', ''),
-                            'summary': item.get('summary', 'No Title'),
-                            'start': start_time,
-                            'end': end_time,
-                            'start_time': format_time(start_time),
-                            'end_time': format_time(end_time),
-                            'needs_noshow_prompt': needs_noshow,
-                            'attendees': len(item.get('attendees', [])),
-                            'status': item.get('status', ''),
-                            'calendar': cal_name,
-                            'source': 'google',
-                        })
-                except Exception:
-                    continue
-        elif session_token:
-            # No saved preferences — pull from primary calendar
-            try:
-                resp = http_requests.get(
-                    f'{GOOGLE_CALENDAR_API}/calendars/primary/events',
-                    headers={'Authorization': f'Bearer {session_token}'},
-                    params={
-                        'timeMin': start_of_day.isoformat(),
-                        'timeMax': end_of_day.isoformat(),
-                        'singleEvents': 'true',
-                        'orderBy': 'startTime',
-                        'maxResults': 20,
-                    },
-                    timeout=10
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    for item in data.get('items', []):
-                        start = item.get('start', {})
-                        end = item.get('end', {})
-                        start_time = start.get('dateTime', start.get('date', ''))
-                        end_time = end.get('dateTime', end.get('date', ''))
-                        needs_noshow = False
-                        if start_time and 'T' in start_time:
-                            try:
-                                from dateutil import parser as dp
-                                event_start = dp.parse(start_time)
-                                if event_start.tzinfo is None:
-                                    event_start = tz.localize(event_start)
-                                mins_since = (now - event_start).total_seconds() / 60
-                                needs_noshow = 0 < mins_since < 60 and mins_since >= 10
-                            except:
-                                pass
-                        all_events.append({
-                            'uid': item.get('id', ''),
-                            'summary': item.get('summary', 'No Title'),
-                            'start': start_time,
-                            'end': end_time,
-                            'start_time': format_time(start_time),
-                            'end_time': format_time(end_time),
-                            'needs_noshow_prompt': needs_noshow,
-                            'attendees': len(item.get('attendees', [])),
-                            'status': item.get('status', ''),
-                            'calendar': 'Primary',
-                            'source': 'google',
-                        })
-            except Exception:
-                pass
 
         # ---- External ICS calendar events ----
         ext_cals = db.execute(
@@ -2026,9 +1701,12 @@ def update_settings():
         db.execute('UPDATE users SET timezone = ? WHERE id = ?',
                    (data['timezone'], user['id']))
 
-    if 'name' in data and data['name'].strip():
-        db.execute('UPDATE users SET name = ? WHERE id = ?',
-                   (data['name'].strip(), user['id']))
+    if 'display_name' in data and data['display_name'].strip():
+        db.execute('UPDATE users SET display_name = ?, name = ? WHERE id = ?',
+                   (data['display_name'].strip(), data['display_name'].strip(), user['id']))
+    elif 'name' in data and data['name'].strip():
+        db.execute('UPDATE users SET name = ?, display_name = ? WHERE id = ?',
+                   (data['name'].strip(), data['name'].strip(), user['id']))
 
     # Update circle-specific settings
     if 'circle_code' in data:
@@ -2091,7 +1769,9 @@ def recent_sessions(code):
         return jsonify({'error': 'Circle not found'}), 404
 
     rows = db.execute('''
-        SELECT s.*, u1.name as user1_name, u2.name as user2_name
+        SELECT s.*,
+               COALESCE(NULLIF(u1.display_name, ''), u1.name) as user1_name,
+               COALESCE(NULLIF(u2.display_name, ''), u2.name) as user2_name
         FROM sessions s
         JOIN users u1 ON u1.id = s.user1_id
         JOIN users u2 ON u2.id = s.user2_id
@@ -2314,11 +1994,11 @@ def get_circle_settings(code):
 
     # Get members list for admin management
     members = db.execute('''
-        SELECT u.id, u.name, u.email, cm.role, cm.joined_at
+        SELECT u.id, COALESCE(NULLIF(u.display_name, ''), u.name) as name, u.email, cm.role, cm.joined_at
         FROM circle_members cm
         JOIN users u ON u.id = cm.user_id
         WHERE cm.circle_id = ?
-        ORDER BY cm.role DESC, u.name
+        ORDER BY cm.role DESC, COALESCE(NULLIF(u.display_name, ''), u.name)
     ''', (circle['id'],)).fetchall()
 
     member_list = [{
@@ -2401,7 +2081,7 @@ init_db()
 
 if __name__ == '__main__':
     print("🎯 Roleplay Circles v2")
-    print(f"   OAuth configured: {OAUTH_CONFIGURED}")
+    print(f"   Auth: email/password")
     print(f"   Database: {DB_PATH}")
     print("   Open http://localhost:5050")
     app.run(debug=True, port=5050, host='0.0.0.0', threaded=True)

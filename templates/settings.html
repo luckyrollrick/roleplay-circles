@@ -24,9 +24,10 @@
         <div class="card-title mb-2">Profile</div>
 
         <div class="form-group">
-            <label class="form-label">Name</label>
-            <input type="text" id="settingsName" class="form-input"
-                   value="{{ user.name }}" placeholder="Your name">
+            <label class="form-label">Display Name</label>
+            <input type="text" id="settingsDisplayName" class="form-input"
+                   value="{{ user.display_name or user.name }}" placeholder="How your team sees you" maxlength="50">
+            <div class="text-xs text-muted mt-1">This is how you appear in circles</div>
         </div>
 
         <div class="form-group">
@@ -61,49 +62,39 @@
         <button onclick="saveProfile()" class="btn btn-primary" id="saveProfileBtn">Save Profile</button>
     </div>
 
-    <!-- Linked Google Accounts -->
+    <!-- Calendar Integration (ICS) -->
     <div class="card card-flat mt-2">
-        <div class="card-title mb-2">🔗 Linked Google Accounts</div>
-        <p class="text-sm text-muted mb-2">Link multiple Google accounts to pull calendars from all of them.</p>
-
-        <div id="linkedAccountsList" style="min-height: 40px;">
-            <div class="text-sm text-muted">Loading...</div>
-        </div>
-
-        <a href="/auth/link-google" class="btn btn-secondary btn-sm mt-2">+ Link Another Google Account</a>
-    </div>
-
-    <!-- Calendar Selection -->
-    <div class="card card-flat mt-2" id="calendarSection">
-        <div class="card-title mb-2">📅 Calendars</div>
-        <p class="text-sm text-muted mb-2">Choose which calendars to check for busy time. If ANY selected calendar shows a meeting, you'll show as busy.</p>
-
-        <div id="calendarList" style="min-height: 60px;">
-            <div class="text-sm text-muted" id="calendarLoading">Loading calendars...</div>
-        </div>
-
-        <button onclick="saveCalendars()" class="btn btn-primary mt-2" id="saveCalendarsBtn" style="display:none;">Save Calendar Preferences</button>
-    </div>
-
-    <!-- External ICS Calendars -->
-    <div class="card card-flat mt-2">
-        <div class="card-title mb-2">🌐 External Calendars (ICS)</div>
-        <p class="text-sm text-muted mb-2">Add calendars from Outlook, Apple Calendar, or any service that provides an ICS URL.</p>
+        <div class="card-title mb-2">📅 Calendar (ICS URL)</div>
+        <p class="text-sm text-muted mb-2">Add your Google Calendar (or any calendar) using its private ICS URL. This lets the app see your schedule for no-show detection.</p>
 
         <div id="externalCalendarsList" style="min-height: 40px;">
             <div class="text-sm text-muted">Loading...</div>
         </div>
 
         <div style="margin-top: 12px; padding: 12px; background: var(--bg-hover); border-radius: var(--radius-sm);">
-            <div class="text-sm font-bold mb-1">Add External Calendar</div>
+            <div class="text-sm font-bold mb-1">Add Calendar</div>
             <div class="form-group" style="margin-bottom: 8px;">
-                <input type="text" id="extCalName" class="form-input" placeholder="Calendar name (e.g. Work Outlook)">
+                <input type="text" id="extCalName" class="form-input" placeholder="Calendar name (e.g. My Google Calendar)">
             </div>
             <div class="form-group" style="margin-bottom: 8px;">
                 <input type="url" id="extCalUrl" class="form-input" placeholder="ICS URL (https://...)">
             </div>
             <button onclick="addExternalCalendar()" class="btn btn-secondary btn-sm" id="addExtCalBtn">Add Calendar</button>
         </div>
+
+        <details style="margin-top: 12px;">
+            <summary class="text-xs text-muted" style="cursor:pointer; font-weight:600;">📖 How to find your Google Calendar ICS URL</summary>
+            <div style="padding-top: 8px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
+                <ol style="padding-left: 20px; margin: 0;">
+                    <li>Open <a href="https://calendar.google.com/calendar/r/settings" target="_blank" style="color: var(--primary);">Google Calendar Settings</a></li>
+                    <li>Click on the calendar you want to add (left sidebar)</li>
+                    <li>Scroll down to <strong>"Integrate calendar"</strong></li>
+                    <li>Copy the <strong>"Secret address in iCal format"</strong> URL</li>
+                    <li>Paste it above — it should start with <code>https://calendar.google.com/calendar/ical/</code></li>
+                </ol>
+                <p style="margin-top: 8px;">⚠️ This is a <em>private</em> read-only URL. It does NOT require Google sign-in — it's just a link.</p>
+            </div>
+        </details>
     </div>
 
     <!-- Circle-specific settings -->
@@ -157,7 +148,7 @@ async function saveProfile() {
         await api('/api/settings', {
             method: 'POST',
             body: {
-                name: document.getElementById('settingsName').value.trim(),
+                display_name: document.getElementById('settingsDisplayName').value.trim(),
                 zoom_link: document.getElementById('settingsZoom').value.trim(),
                 timezone: document.getElementById('settingsTimezone').value,
             }
@@ -171,50 +162,6 @@ async function saveProfile() {
     btn.textContent = 'Save Profile';
 }
 
-// Linked Google Accounts
-async function loadLinkedAccounts() {
-    const listEl = document.getElementById('linkedAccountsList');
-    try {
-        const resp = await fetch('/api/linked-accounts');
-        const data = await resp.json();
-
-        if (!data.accounts || data.accounts.length === 0) {
-            listEl.innerHTML = '<div class="text-sm text-muted">No linked accounts. Sign in with Google to get started.</div>';
-            return;
-        }
-
-        let html = '';
-        for (const acct of data.accounts) {
-            const primary = acct.is_primary ? ' <span class="text-xs" style="color:var(--primary);">(primary)</span>' : '';
-            const removeBtn = acct.is_primary ? '' : `<button onclick="removeLinkedAccount(${acct.id})" class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:11px;">Remove</button>`;
-            html += `
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:6px;">
-                    <div>
-                        <span class="text-sm font-bold">${acct.name || acct.email}</span>${primary}
-                        <div class="text-xs text-muted">${acct.email}</div>
-                    </div>
-                    ${removeBtn}
-                </div>
-            `;
-        }
-        listEl.innerHTML = html;
-    } catch (err) {
-        listEl.innerHTML = '<div class="text-sm text-muted">Could not load accounts.</div>';
-    }
-}
-
-async function removeLinkedAccount(id) {
-    if (!confirm('Remove this linked Google account? Its calendars will no longer be checked.')) return;
-    try {
-        await fetch(`/api/linked-accounts/${id}`, { method: 'DELETE' });
-        showToast('Account removed');
-        loadLinkedAccounts();
-        loadCalendars();
-    } catch (err) {
-        showToast(err.message, 'error');
-    }
-}
-
 // External ICS Calendars
 async function loadExternalCalendars() {
     const listEl = document.getElementById('externalCalendarsList');
@@ -223,7 +170,7 @@ async function loadExternalCalendars() {
         const data = await resp.json();
 
         if (!data.calendars || data.calendars.length === 0) {
-            listEl.innerHTML = '<div class="text-sm text-muted">No external calendars added yet.</div>';
+            listEl.innerHTML = '<div class="text-sm text-muted">No calendars added yet. Add one below!</div>';
             return;
         }
 
@@ -275,7 +222,6 @@ async function addExternalCalendar() {
         document.getElementById('extCalName').value = '';
         document.getElementById('extCalUrl').value = '';
         loadExternalCalendars();
-        loadCalendars();
     } catch (err) {
         showToast(err.message, 'error');
     }
@@ -297,105 +243,18 @@ async function toggleExternalCal(id, selected) {
 }
 
 async function removeExternalCalendar(id) {
-    if (!confirm('Remove this external calendar?')) return;
+    if (!confirm('Remove this calendar?')) return;
     try {
         await fetch(`/api/external-calendars/${id}`, { method: 'DELETE' });
         showToast('Calendar removed');
         loadExternalCalendars();
-        loadCalendars();
     } catch (err) {
         showToast(err.message, 'error');
     }
 }
 
-// Calendar selection
-let calendarData = [];
-
-async function loadCalendars() {
-    const listEl = document.getElementById('calendarList');
-    const loadingEl = document.getElementById('calendarLoading');
-    const saveBtn = document.getElementById('saveCalendarsBtn');
-
-    try {
-        const resp = await fetch('/api/calendars');
-        const data = await resp.json();
-
-        if (data.error === 'No access token' || data.error === 'token_expired') {
-            listEl.innerHTML = '<div class="text-sm text-muted">Sign in with Google to manage calendars.</div>';
-            return;
-        }
-
-        if (!data.calendars || data.calendars.length === 0) {
-            listEl.innerHTML = '<div class="text-sm text-muted">No calendars found.</div>';
-            return;
-        }
-
-        calendarData = data.calendars.filter(c => c.source !== 'ics'); // ICS managed separately
-        let html = '';
-        let lastAccount = '';
-        for (const cal of calendarData) {
-            // Group header by account
-            if (cal.account_email && cal.account_email !== lastAccount) {
-                lastAccount = cal.account_email;
-                html += `<div class="text-xs text-muted font-bold" style="margin:12px 0 6px 0;text-transform:uppercase;">${cal.account_email}</div>`;
-            }
-            const checked = cal.selected ? 'checked' : '';
-            const primary = cal.primary ? ' <span class="text-xs text-muted">(primary)</span>' : '';
-            const colorDot = cal.color ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${cal.color};margin-right:8px;vertical-align:middle;"></span>` : '';
-            html += `
-                <label style="display:flex;align-items:center;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:6px;cursor:pointer;">
-                    <input type="checkbox" class="cal-checkbox" data-cal-id="${cal.id}" data-account-id="${cal.account_id || ''}" ${checked}
-                           style="width:18px;height:18px;margin-right:10px;accent-color:var(--primary);">
-                    ${colorDot}
-                    <span class="text-sm">${cal.summary}${primary}</span>
-                </label>
-            `;
-        }
-        listEl.innerHTML = html;
-        saveBtn.style.display = 'inline-flex';
-
-    } catch (err) {
-        listEl.innerHTML = '<div class="text-sm text-muted">Could not load calendars.</div>';
-    }
-}
-
-async function saveCalendars() {
-    const btn = document.getElementById('saveCalendarsBtn');
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-
-    const checkboxes = document.querySelectorAll('.cal-checkbox');
-    const selections = [];
-    checkboxes.forEach(cb => {
-        const cal = calendarData.find(c => c.id === cb.dataset.calId);
-        selections.push({
-            id: cb.dataset.calId,
-            summary: cal ? cal.summary : '',
-            selected: cb.checked,
-            color: cal ? cal.color : '',
-            account_id: cb.dataset.accountId ? parseInt(cb.dataset.accountId) : null,
-            source: cal ? cal.source : 'google',
-        });
-    });
-
-    try {
-        await api('/api/calendars/select', {
-            method: 'POST',
-            body: { calendars: selections }
-        });
-        showToast('Calendar preferences saved!');
-    } catch (err) {
-        showToast(err.message, 'error');
-    }
-
-    btn.disabled = false;
-    btn.textContent = 'Save Calendar Preferences';
-}
-
-// Load everything on page load
+// Load on page load
 document.addEventListener('DOMContentLoaded', () => {
-    loadLinkedAccounts();
-    loadCalendars();
     loadExternalCalendars();
 });
 

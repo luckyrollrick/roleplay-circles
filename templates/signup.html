@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Sign Up - Roleplay Circles{% endblock %}
+
+{% block body %}
+<div class="landing">
+    <div class="landing-icon">🎯</div>
+    <h1 style="font-size: 1.8rem;">Create Account</h1>
+    <p style="margin-bottom: 24px;">Sign up to start roleplaying with your team.</p>
+
+    <div class="card card-flat" style="max-width: 400px; width: 100%; text-align: left;">
+        <form action="/signup" method="POST">
+            <div class="form-group">
+                <label class="form-label">Display Name</label>
+                <input type="text" name="display_name" class="form-input" placeholder="How your team sees you" required maxlength="50">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input type="email" name="email" class="form-input" placeholder="you@company.com" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input type="password" name="password" class="form-input" placeholder="At least 6 characters" required minlength="6">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+        </form>
+    </div>
+
+    <p class="text-sm text-muted mt-3">
+        Already have an account? <a href="/login">Sign in</a>
+    </p>
+    <p class="text-sm text-muted mt-1">
+        <a href="/">← Back to home</a>
+    </p>
+</div>
+{% endblock %}

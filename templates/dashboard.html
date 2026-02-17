@@ -10,10 +10,7 @@
         <div class="nav-links">
             <a href="/settings" class="btn btn-ghost btn-sm">⚙️ Settings</a>
             <div class="nav-user">
-                {% if user.avatar_url %}
-                <img src="{{ user.avatar_url }}" alt="" class="nav-avatar">
-                {% endif %}
-                <span class="nav-user-name">{{ user.name }}</span>
+                <span class="nav-user-name">{{ user.display_name or user.name }}</span>
             </div>
             <a href="/auth/logout" class="btn btn-ghost btn-sm">Logout</a>
         </div>
@@ -23,7 +20,7 @@
 
 {% block body %}
 <div class="container page">
-    <div class="page-title">Welcome, {{ user.name.split(' ')[0] }} 👋</div>
+    <div class="page-title">Welcome, {{ (user.display_name or user.name).split(' ')[0] }} 👋</div>
     <div class="page-subtitle">Your roleplay circles</div>
 
     {% if circles %}
