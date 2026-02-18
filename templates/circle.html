@@ -113,6 +113,11 @@
                 👥 Members
             </div>
             <div id="adminMemberList"></div>
+
+            <!-- Delete Circle -->
+            <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border);">
+                <button onclick="deleteCircle()" class="btn btn-danger btn-sm" style="font-size:0.75rem; width:100%;">🗑️ Delete Circle</button>
+            </div>
         </div>
     </details>
 </div>
@@ -875,6 +880,18 @@ async function loadInvite() {
     } catch (err) {
         // Not admin or error - hide invite button
         inviteUrl = '';
+    }
+}
+
+async function deleteCircle() {
+    if (!confirm('Are you sure you want to delete this circle? This cannot be undone.')) return;
+    if (!confirm('Really? All members, sessions, and data will be permanently deleted.')) return;
+    try {
+        await api(`/api/circle/${CIRCLE_CODE}/delete`, { method: 'DELETE' });
+        showToast('Circle deleted', 'success');
+        window.location.href = '/dashboard';
+    } catch (err) {
+        showToast(err.message || 'Failed to delete', 'error');
     }
 }
 

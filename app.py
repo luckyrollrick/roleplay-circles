@@ -2047,6 +2047,41 @@ def update_circle_settings(code):
     return jsonify({'success': True})
 
 
+# ============ DELETE CIRCLE ============
+
+@app.route('/api/circle/<code>/delete', methods=['DELETE'])
+@login_required
+def delete_circle(code):
+    """Delete a circle and all associated data. Admin only."""
+    user = get_current_user()
+    db = get_db()
+
+    circle = db.execute('SELECT * FROM circles WHERE code = ?', (code,)).fetchone()
+    if not circle:
+        return jsonify({'error': 'Circle not found'}), 404
+
+    membership = db.execute(
+        'SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?',
+        (circle['id'], user['id'])
+    ).fetchone()
+    if not membership or membership['role'] != 'admin':
+        return jsonify({'error': 'Only admins can delete circles'}), 403
+
+    cid = circle['id']
+
+    # Delete all associated data
+    db.execute('DELETE FROM active_session_members WHERE session_id IN (SELECT id FROM active_sessions WHERE circle_id = ?)', (cid,))
+    db.execute('DELETE FROM active_sessions WHERE circle_id = ?', (cid,))
+    db.execute('DELETE FROM roleplay_invites WHERE circle_id = ?', (cid,))
+    db.execute('DELETE FROM availability WHERE circle_id = ?', (cid,))
+    db.execute('DELETE FROM sessions WHERE circle_id = ?', (cid,))
+    db.execute('DELETE FROM circle_members WHERE circle_id = ?', (cid,))
+    db.execute('DELETE FROM circles WHERE id = ?', (cid,))
+
+    db.commit()
+    return jsonify({'success': True})
+
+
 # ============ ADMIN CODE CHECK ============
 
 @app.route('/api/admin-code-required')
