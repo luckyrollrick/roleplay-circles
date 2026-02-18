@@ -46,7 +46,7 @@
 
     <!-- Current / Next Call (compact) -->
     <div id="nextCallSection" style="display:none; margin-bottom:12px;">
-        <div class="text-xs text-muted" style="margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Current Call</div>
+        <div id="nextCallLabel" class="text-xs text-muted" style="margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Next Call</div>
         <div id="nextCallCard" style="padding:10px 14px; background:var(--bg-card); border:2px solid var(--border); border-radius:var(--radius-sm);"></div>
     </div>
 
@@ -693,6 +693,25 @@ async function loadNextCall() {
         const e = data.events[0];
         section.style.display = 'block';
 
+        // Determine if call is happening now or upcoming
+        const label = document.getElementById('nextCallLabel');
+        const now = new Date();
+        const callStart = new Date(e.start);
+        const callEnd = new Date(e.end);
+        const minsUntil = Math.round((callStart - now) / 60000);
+
+        if (now >= callStart && now <= callEnd) {
+            label.textContent = '🔴 On Call Now';
+        } else if (minsUntil <= 0) {
+            label.textContent = 'Current Call';
+        } else if (minsUntil < 60) {
+            label.textContent = `Next Call (in ${minsUntil}m)`;
+        } else {
+            const hrs = Math.floor(minsUntil / 60);
+            const mins = minsUntil % 60;
+            label.textContent = mins > 0 ? `Next Call (in ${hrs}h ${mins}m)` : `Next Call (in ${hrs}h)`;
+        }
+
         let noshowBtn = '';
         if (e.needs_noshow_prompt) {
             noshowBtn = `<button onclick="markNoShow('${e.uid}', '${e.summary.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm" style="padding:3px 10px; font-size:0.75rem; margin-top:6px;">No-show? Go available</button>`;
@@ -702,7 +721,7 @@ async function loadNextCall() {
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                 <div>
                     <div style="font-weight:600; font-size:0.85rem;">${e.summary}</div>
-                    <div class="text-xs text-muted">${e.start_time} – ${e.end_time}${e.calendar ? ' · ' + e.calendar : ''}</div>
+                    <div class="text-xs text-muted">${e.start_time} - ${e.end_time}${e.calendar ? ' · ' + e.calendar : ''}</div>
                     ${noshowBtn}
                 </div>
             </div>
