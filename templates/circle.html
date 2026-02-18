@@ -717,12 +717,26 @@ async function loadNextCall() {
             noshowBtn = `<button onclick="markNoShow('${e.uid}', '${e.summary.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm" style="padding:3px 10px; font-size:0.75rem; margin-top:6px;">No-show? Go available</button>`;
         }
 
+        // Gap nudge: if next call is 30+ min away, user is unavailable, and not on a call right now
+        let gapNudge = '';
+        const isOnCall = now >= callStart && now <= callEnd;
+        if (!isAvailable && !isOnCall && minsUntil >= 30) {
+            const gapText = minsUntil < 60 ? `${minsUntil}m` : `${Math.floor(minsUntil/60)}h ${minsUntil%60}m`;
+            gapNudge = `
+                <div style="margin-top:8px; padding:8px 12px; background:rgba(106,176,76,0.1); border:1px solid rgba(106,176,76,0.3); border-radius:var(--radius-sm);">
+                    <div class="text-xs" style="color:#6ab04c; font-weight:600;">🎯 ${gapText} gap before your next call</div>
+                    <button onclick="toggleAvailability()" class="btn btn-primary btn-sm" style="padding:4px 12px; font-size:0.75rem; margin-top:6px; width:100%;">Go Available for Roleplay</button>
+                </div>
+            `;
+        }
+
         card.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <div>
+                <div style="width:100%;">
                     <div style="font-weight:600; font-size:0.85rem;">${e.summary}</div>
                     <div class="text-xs text-muted">${e.start_time} - ${e.end_time}${e.calendar ? ' · ' + e.calendar : ''}</div>
                     ${noshowBtn}
+                    ${gapNudge}
                 </div>
             </div>
         `;
